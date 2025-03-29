@@ -101,14 +101,14 @@ fn test_extract_deeply_nested_field_comprehensive() {
     };
 
     // --- Valid Cases ---
-    let extractor = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
+    let extractor = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
         "middle", "inner", "value",
     ])
     .unwrap();
     let result = extractor.evaluate(&data);
     assert_eq!(result.unwrap(), FieldScalarValue::I32(123));
 
-    let extractor_option = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
+    let extractor_option = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
         "middle",
         "inner",
         "another_value",
@@ -120,7 +120,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
         FieldScalarValue::Option(Some(Box::new(FieldScalarValue::String("test".to_string()))))
     );
 
-    let extractor_deepest = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
+    let extractor_deepest = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
         "middle",
         "inner",
         "nested_struct",
@@ -134,7 +134,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
 
     // Non-existent intermediate field
     let extractor_bad_intermediate =
-        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
+        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
             "middle",
             "non_existent",
             "value",
@@ -149,13 +149,12 @@ fn test_extract_deeply_nested_field_comprehensive() {
     ));
 
     // Non-existent final field
-    let extractor_bad_final =
-        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
-            "middle",
-            "inner",
-            "non_existent",
-        ])
-        .unwrap();
+    let extractor_bad_final = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
+        "middle",
+        "inner",
+        "non_existent",
+    ])
+    .unwrap();
     let result_bad_final = extractor_bad_final.evaluate(&data);
     assert!(matches!(
         result_bad_final,
@@ -165,7 +164,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
 
     // Attempt to traverse through a non-struct primitive
     let extractor_traverse_primitive =
-        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
+        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
             "middle",
             "primitive",
             "should_fail",
@@ -184,13 +183,12 @@ fn test_extract_deeply_nested_field_comprehensive() {
     );
 
     // Attempt to extract a non-scalar (struct) as the final value
-    let extractor_non_scalar =
-        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
-            "middle",
-            "inner",
-            "nested_struct",
-        ])
-        .unwrap();
+    let extractor_non_scalar = serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&[
+        "middle",
+        "inner",
+        "nested_struct",
+    ])
+    .unwrap();
     let result_non_scalar = extractor_non_scalar.evaluate(&data);
     assert!(matches!(
         result_non_scalar,
@@ -203,10 +201,8 @@ fn test_extract_deeply_nested_field_comprehensive() {
             .is_err()
     ); // Empty Vec
     assert!(
-        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&vec![
-            "field1", "", "field3"
-        ])
-        .is_err()
+        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&["field1", "", "field3"])
+            .is_err()
     ); // Empty segment
 }
 

@@ -1,7 +1,7 @@
 [package]
 name = "serde_evaluate"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 description = "Extract single scalar field values from Serializeable structs without full deserialization."
 authors = [
     "Pierre Zemb <contact@pierrezemb.fr>"

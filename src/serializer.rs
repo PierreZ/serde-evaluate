@@ -10,9 +10,9 @@ impl ser::SerializeTuple for Skip {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_element<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Ok(())
     }
@@ -26,9 +26,9 @@ impl ser::SerializeTupleStruct for Skip {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
+    fn serialize_field<T>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Ok(())
     }
@@ -42,16 +42,16 @@ impl ser::SerializeMap for Skip {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_key<T: ?Sized>(&mut self, _key: &T) -> Result<(), Self::Error>
+    fn serialize_key<T>(&mut self, _key: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Ok(())
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
+    fn serialize_value<T>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Ok(())
     }
@@ -65,9 +65,9 @@ impl ser::SerializeSeq for Skip {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_element<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Ok(())
     }
@@ -245,7 +245,10 @@ impl Serializer for &mut FieldValueExtractorSerializer {
         Ok(())
     }
 
-    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
         // Called for Option::Some(value)
         if self.capturing {
             // Target field is an Option::Some. Set flag to wrap the *next* value captured.
@@ -281,23 +284,29 @@ impl Serializer for &mut FieldValueExtractorSerializer {
         self.serialize_unit()
     }
 
-    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+    fn serialize_newtype_struct<T>(
         self,
         _name: &'static str,
         value: &T,
-    ) -> Result<Self::Ok, Self::Error> {
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
         // For newtype structs (e.g., struct Seconds(u64)), serialize the inner value.
         // The capturing flag state is passed through.
         value.serialize(&mut *self)
     }
 
-    fn serialize_newtype_variant<T: ?Sized + Serialize>(
+    fn serialize_newtype_variant<T>(
         self,
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
         _value: &T,
-    ) -> Result<Self::Ok, Self::Error> {
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
         // Capturing from inside enum variants is not supported.
         if self.capturing {
             self.capturing = false;
@@ -411,9 +420,9 @@ impl Serializer for &mut FieldValueExtractorSerializer {
                 // This means the final target path element pointed to a struct, not a scalar.
                 // Use capture_unsupported helper
                 self.capturing = false;
-                return Err(EvaluateError::UnsupportedType {
+                Err(EvaluateError::UnsupportedType {
                     type_name: "struct",
-                });
+                })
             } else {
                 // Path is exhausted but not capturing. This is fine, we're just skipping.
                 Ok(self)
@@ -441,13 +450,13 @@ impl Serializer for &mut FieldValueExtractorSerializer {
 }
 
 // Implement SerializeMap to handle key-value pairs within a map.
-impl<'a> ser::SerializeMap for &'a mut FieldValueExtractorSerializer {
+impl ser::SerializeMap for &mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         // Check if we should even attempt to match the key
         if !self.capturing || self.current_path_index >= self.path.len() {
@@ -477,9 +486,9 @@ impl<'a> ser::SerializeMap for &'a mut FieldValueExtractorSerializer {
         Ok(())
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         let key_match_status = self.current_map_key_match.take(); // Consume the match status
 
@@ -488,7 +497,7 @@ impl<'a> ser::SerializeMap for &'a mut FieldValueExtractorSerializer {
                 // Key matched! Serialize the value, advancing the path index for the nested call.
                 self.current_path_index += 1;
                 let res = value.serialize(&mut **self); // Recurse/capture
-                // Backtrack the index *after* the value serialization is complete.
+                                                        // Backtrack the index *after* the value serialization is complete.
                 self.current_path_index -= 1;
                 res?; // Propagate any errors from the value serialization
             }
@@ -527,17 +536,13 @@ impl<'a> ser::SerializeMap for &'a mut FieldValueExtractorSerializer {
 }
 
 // Implement SerializeStruct to handle fields within a struct.
-impl<'a> ser::SerializeStruct for &'a mut FieldValueExtractorSerializer {
+impl ser::SerializeStruct for &mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
+    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         // If we've already found the result, skip remaining fields.
         if self.result.is_some() {
@@ -704,12 +709,12 @@ impl Serializer for &mut StringKeySerializer {
             type_name: "Map key must be a string",
         })
     }
-    fn serialize_some<T: ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error>
+    fn serialize_some<T>(self, _value: &T) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
+            type_name: "Option",
         })
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -732,19 +737,19 @@ impl Serializer for &mut StringKeySerializer {
             type_name: "Map key must be a string",
         })
     }
-    fn serialize_newtype_struct<T: ?Sized>(
+    fn serialize_newtype_struct<T>(
         self,
         _name: &'static str,
         _value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Err(EvaluateError::UnsupportedType {
             type_name: "Map key must be a string",
         })
     }
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T>(
         self,
         _name: &'static str,
         _variant_index: u32,
@@ -752,7 +757,7 @@ impl Serializer for &mut StringKeySerializer {
         _value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: ?Sized + Serialize,
     {
         Err(EvaluateError::UnsupportedType {
             type_name: "Map key must be a string",
