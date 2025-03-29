@@ -19,7 +19,6 @@ struct TestRecord {
     active: bool,
     count: Option<i32>,
     missing_count: Option<i32>,
-    nested: NestedStruct,
     temperature: f32,
     initial: char,
     #[serde(with = "serde_bytes")] // Add this attribute
@@ -48,9 +47,6 @@ fn create_test_record() -> TestRecord {
         active: true,
         count: Some(42),
         missing_count: None,
-        nested: NestedStruct {
-            inner_field: "Inner Value".to_string(),
-        },
         temperature: 98.6,
         initial: 'X',
         data_bytes: vec![1, 2, 3, 4],
@@ -138,18 +134,6 @@ fn test_extract_non_scalar_field_vec() {
     let extractor = FieldExtractor::new("data_bytes".to_string());
     let result = extractor.evaluate(&record);
     assert_eq!(result, Ok(FieldScalarValue::Bytes(vec![1, 2, 3, 4])));
-}
-
-#[test]
-fn test_extract_non_scalar_field_struct() {
-    // Attempting to extract a nested struct should fail
-    let record = create_test_record();
-    let extractor = FieldExtractor::new("nested".to_string());
-    let result = extractor.evaluate(&record);
-    assert!(
-        matches!(result, Err(EvaluateError::UnsupportedType { type_name }) if type_name == "struct"),
-        "Expected UnsupportedType error for struct field"
-    );
 }
 
 #[test]

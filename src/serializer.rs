@@ -78,20 +78,39 @@ impl ser::SerializeSeq for Skip {
 }
 
 // Custom Serializer Implementation Struct
-// This struct drives the serialization process, looking for the target field.
-pub(crate) struct FieldValueExtractorSerializer<'a> {
-    target_field_name: &'a str,
-    capturing: bool,                  // True if the next value should be captured
-    expecting_option_inner: bool,     // True if inside a Some() variant and capturing
+// This struct drives the serialization process, looking for the target field path.
+pub(crate) struct FieldValueExtractorSerializer {
+    path: Vec<String>,                // The full path to the target field
+    current_path_index: usize,        // Current index/depth in the path traversal
+    capturing: bool, // True if the next value should be captured (at the final path segment)
+    expecting_option_inner: bool, // True if inside a Some() variant and capturing
     result: Option<FieldScalarValue>, // Stores the final extracted value
 }
 
 // Implement helper methods for the serializer
-impl<'a> FieldValueExtractorSerializer<'a> {
-    pub(crate) fn new(field_name: &'a str) -> Self {
+impl FieldValueExtractorSerializer {
+    // Updated simple constructor: uses new_nested
+    pub(crate) fn new(field_name: &str) -> Self {
+        // Create a single-element slice for the path
+        Self::new_nested(vec![field_name.to_string()])
+        /* Old implementation:
         FieldValueExtractorSerializer {
             target_field_name: field_name,
             capturing: false,
+            expecting_option_inner: false,
+            result: None,
+        }
+        */
+    }
+
+    // Implement the nested constructor
+    pub(crate) fn new_nested(path_segments: Vec<String>) -> Self {
+        // This needs to be updated to use the new fields and correct type
+        // unimplemented!("Implement new_nested() with path and current_path_index")
+        FieldValueExtractorSerializer {
+            path: path_segments,
+            current_path_index: 0, // Start at the beginning of the path
+            capturing: false,      // Not capturing initially
             expecting_option_inner: false,
             result: None,
         }
@@ -100,15 +119,32 @@ impl<'a> FieldValueExtractorSerializer<'a> {
     // Called by individual serialize_* methods.
     // If capturing is true, stores the value (wrapping in Option if needed)
     // and resets flags.
+    // This needs update to check current_path_index vs path.len()
     fn capture_value(&mut self, value: FieldScalarValue) {
         if self.capturing {
-            self.result = if self.expecting_option_inner {
-                Some(FieldScalarValue::Option(Some(Box::new(value))))
+            // Only capture if we have reached the end of the specified path.
+            if self.current_path_index == self.path.len() {
+                self.result = if self.expecting_option_inner {
+                    Some(FieldScalarValue::Option(Some(Box::new(value))))
+                } else {
+                    Some(value)
+                };
+                // Reset flags after successful capture at the correct path depth.
+                self.capturing = false;
+                self.expecting_option_inner = false;
             } else {
-                Some(value)
-            };
-            self.capturing = false;
-            self.expecting_option_inner = false; // Always reset this after capture
+                // If capturing is true but index hasn't reached the end, it's an internal logic error
+                // in how capturing was set (likely in serialize_field or serialize_some).
+                // Reset flags defensively, but don't store the value.
+                eprintln!(
+                    "Warning: capture_value called while capturing=true but current_path_index ({}) != path.len() ({}). Path: {:?}",
+                    self.current_path_index,
+                    self.path.len(),
+                    self.path
+                );
+                self.capturing = false;
+                self.expecting_option_inner = false;
+            }
         }
     }
 
@@ -120,7 +156,7 @@ impl<'a> FieldValueExtractorSerializer<'a> {
 // Implement the Serializer trait
 // Delegates most primitive types to capture_value.
 // Handles Option and compound types specifically.
-impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
+impl Serializer for &mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
@@ -358,14 +394,26 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
+        // If capturing, the target field cannot be a struct itself
         if self.capturing {
-            // Found the target field, but it's a struct (unsupported)
-            self.capturing = false; // Stop capturing
+            // This should ideally not happen if logic is correct, as capturing should only be true
+            // when serialize_field encounters the *last* segment and serializes its value.
+            self.capturing = false;
+            eprintln!(
+                "Warning: serialize_struct called while capturing=true. Path: {:?}, Index: {}",
+                self.path, self.current_path_index
+            );
             Err(EvaluateError::UnsupportedType {
-                type_name: "struct",
+                type_name: "struct (at capture)",
             })
+        } else if self.path.is_empty() || self.current_path_index >= self.path.len() {
+            // Path is exhausted or invalid, cannot proceed into struct meaningfully for extraction
+            // If path is empty, FieldNotFound(""). If index >= len, means traversal went wrong somewhere.
+            Err(EvaluateError::FieldNotFound {
+                field_name: self.path.join("."),
+            }) // Corrected construction
         } else {
-            // Not capturing, just skip the struct content
+            // Allow serialization to proceed into the struct's fields
             Ok(self)
         }
     }
@@ -387,7 +435,7 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
 }
 
 // Implement SerializeStruct to handle fields within a struct.
-impl<'a> SerializeStruct for &'a mut FieldValueExtractorSerializer<'_> {
+impl SerializeStruct for &mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
@@ -396,34 +444,64 @@ impl<'a> SerializeStruct for &'a mut FieldValueExtractorSerializer<'_> {
         key: &'static str,
         value: &T,
     ) -> Result<(), Self::Error> {
-        // Check if this is the field we are looking for *before* serializing value
-        if key == self.target_field_name {
-            // If we already found it (e.g., duplicate field name?), ignore subsequent ones.
-            if self.result.is_none() {
-                self.capturing = true;
-                // Serialize the value. This will call a serialize_* method.
-                // That method will capture the value if it's a scalar/option
-                // and reset self.capturing = false.
-                // Or it will return UnsupportedType if the value is not extractable.
-                value.serialize(&mut **self)?;
-                // Defensive reset in case serialize_* didn't run capture_value (e.g., error)
+        // If we've already found the result, skip remaining fields.
+        if self.result.is_some() {
+            return Ok(());
+        }
+
+        // Check if path is valid and key matches the *current* segment
+        if self.current_path_index < self.path.len() {
+            let expected_key = &self.path[self.current_path_index];
+            if key == expected_key {
+                // Match found for the current path segment.
+                let is_last_segment = self.current_path_index == self.path.len() - 1;
+
+                if is_last_segment {
+                    // This is the final segment. Set capturing and serialize the value.
+                    self.capturing = true;
+                    // Increment index *before* serializing value, so capture_value check works correctly.
+                    self.current_path_index += 1;
+                    let res = value.serialize(&mut **self);
+                    // Reset capturing flag defensively after serialization attempt.
+                    self.capturing = false;
+                    // Decrement index back *after* serialization of this field is done.
+                    // Allows subsequent fields at the *parent* level to be processed correctly if needed (though result is already set usually).
+                    self.current_path_index -= 1;
+                    res?; // Propagate error if serialization/capture failed.
+                } else {
+                    // Not the last segment. Need to go deeper.
+                    // Increment index before recursing into the value.
+                    self.current_path_index += 1;
+                    // Serialize the nested value. This might call serialize_struct again.
+                    let res = value.serialize(&mut **self);
+                    // Decrement index *after* recursing. Backtrack for the next field at the current level.
+                    self.current_path_index -= 1;
+                    res?; // Propagate error if nested serialization failed.
+                }
+            } else {
+                // Key doesn't match the current path segment. Skip this field.
+                // Serialize the value anyway to allow Serde to skip its content.
+                // Ensure capturing is false during the skip.
+                let was_capturing = self.capturing;
                 self.capturing = false;
+                let _ = value.serialize(&mut **self); // Ignore result/errors for non-target fields
+                self.capturing = was_capturing; // Restore capturing state if it was somehow true?
             }
         } else {
-            // Not the target field, but we still need to serialize it to advance the process.
-            // The result is ignored, effectively skipping the field's content.
-            // Pass the serializer through; it will ignore the value since capturing is false.
-            let _ = value.serialize(&mut **self); // Ignore result, errors handled inside?
-            // Alternative: value.serialize(&mut **self)?; // Propagate errors?
-            // Let's stick with ignoring for now, assuming non-target fields shouldn't error out the whole process.
+            // current_path_index >= path.len(). This shouldn't be reached if serialize_struct check works.
+            // Means we are serializing fields after the target path was fully traversed or failed.
+            // We can simply skip serializing further fields in this struct.
+            // However, Serde expects all fields to be serialized, so we still call serialize.
+            let _ = value.serialize(&mut **self);
         }
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        // The end of serializing a struct's fields.
-        // The actual result (if captured) is stored in self.result.
-        // Return the standard Ok unit type.
+        // End of struct. If we traversed the whole path but didn't capture a value,
+        // it means the final field was not found or was an unsupported type.
+        // The `into_result` method combined with initial state handles FieldNotFound.
+        // Errors during traversal (e.g., UnsupportedType) are returned earlier.
         Ok(())
     }
 }

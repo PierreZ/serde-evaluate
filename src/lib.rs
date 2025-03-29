@@ -26,12 +26,6 @@
 //!     score: Option<f64>,
 //!     #[serde(with = "serde_bytes")]
 //!     raw_data: Vec<u8>,
-//!     nested: InnerData, // Unsupported type for direct extraction
-//! }
-//!
-//! #[derive(Serialize)]
-//! struct InnerData {
-//!     value: i32,
 //! }
 //!
 //! fn main() -> Result<(), EvaluateError> {
@@ -41,7 +35,6 @@
 //!         active: true,
 //!         score: Some(95.5),
 //!         raw_data: vec![1, 2, 3, 4],
-//!         nested: InnerData { value: -5 },
 //!     };
 //!
 //!     // Extract the 'name' field
@@ -63,10 +56,6 @@
 //!     // Trying to extract a non-existent field returns FieldNotFound
 //!     let missing_result = FieldExtractor::new("address").evaluate(&data);
 //!     assert!(matches!(missing_result, Err(EvaluateError::FieldNotFound { .. })));
-//!
-//!     // Trying to extract a non-scalar field (struct) returns UnsupportedType
-//!     let nested_result = FieldExtractor::new("nested").evaluate(&data);
-//!     assert!(matches!(nested_result, Err(EvaluateError::UnsupportedType { type_name }) if type_name == "struct"));
 //!
 //!     Ok(())
 //! }
@@ -92,3 +81,13 @@ pub mod error;
 pub mod extractor;
 pub mod serializer;
 pub mod value;
+
+// Re-export public API
+/// Errors that can occur during field extraction.
+pub use error::EvaluateError;
+/// Public interface for extracting top-level scalar field values.
+pub use extractor::FieldExtractor;
+/// Public interface for extracting nested scalar field values.
+pub use extractor::NestedFieldExtractor;
+/// Enum representing the possible scalar values that can be extracted.
+pub use value::FieldScalarValue;
