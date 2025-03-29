@@ -1,7 +1,16 @@
 [package]
-name = "serde-evaluate"
+name = "serde_evaluate"
 version = "0.1.0"
 edition = "2024"
+description = "Extract single scalar field values from Serializeable structs without full deserialization."
+authors = [
+    "Pierre Zemb <contact@pierrezemb.fr>"
+]
+license = "Apache-2.0"
+repository = "https://github.com/pierrez/serde-evaluate"
+readme = "README.md"
+keywords = ["serde", "serialization", "extraction", "evaluate", "field"]
+categories = ["encoding", "data-structures"]
 
 [dependencies]
 serde = { version = "1.0.214", features = ["derive"] }
