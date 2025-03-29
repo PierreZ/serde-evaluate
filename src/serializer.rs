@@ -94,20 +94,10 @@ impl FieldValueExtractorSerializer {
     pub(crate) fn new(field_name: &str) -> Self {
         // Create a single-element slice for the path
         Self::new_nested(vec![field_name.to_string()])
-        /* Old implementation:
-        FieldValueExtractorSerializer {
-            target_field_name: field_name,
-            capturing: false,
-            expecting_option_inner: false,
-            result: None,
-        }
-        */
     }
 
     // Implement the nested constructor
     pub(crate) fn new_nested(path_segments: Vec<String>) -> Self {
-        // This needs to be updated to use the new fields and correct type
-        // unimplemented!("Implement new_nested() with path and current_path_index")
         FieldValueExtractorSerializer {
             path: path_segments,
             current_path_index: 0, // Start at the beginning of the path

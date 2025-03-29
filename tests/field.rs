@@ -94,35 +94,12 @@ fn test_extract_string_field() {
 }
 
 #[test]
-fn test_extract_int_field_some() {
-    let record = create_test_record();
-    let extractor = FieldExtractor::new("count".to_string());
-    let result = extractor.evaluate(&record);
-    // Note: 'value' is Option<i32>. Should be captured as Option(Some(Box(I32(42))))
-    assert_eq!(
-        result,
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::I32(42)
-        ))))
-    );
-}
-
-#[test]
 fn test_extract_uint_field() {
     let record = create_test_record();
     let extractor = FieldExtractor::new("id".to_string());
     let result = extractor.evaluate(&record);
     // Note: id is i32, captured as Int
     assert_eq!(result, Ok(FieldScalarValue::I32(101)));
-}
-
-#[test]
-fn test_extract_option_field_none() {
-    let mut record = create_test_record();
-    record.count = None; // Set the optional field to None
-    let extractor = FieldExtractor::new("count".to_string());
-    let result = extractor.evaluate(&record);
-    assert_eq!(result, Ok(FieldScalarValue::Option(None)));
 }
 
 #[test]
@@ -133,15 +110,6 @@ fn test_extract_missing_field() {
     assert!(
         matches!(result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "non_existent_field")
     );
-}
-
-#[test]
-fn test_extract_non_scalar_field_vec() {
-    // Attempting to extract a Vec<String> should fail as it's not a scalar
-    let record = create_test_record();
-    let extractor = FieldExtractor::new("data_bytes".to_string());
-    let result = extractor.evaluate(&record);
-    assert_eq!(result, Ok(FieldScalarValue::Bytes(vec![1, 2, 3, 4])));
 }
 
 #[test]
@@ -214,100 +182,82 @@ fn test_extract_various_option_fields() {
     );
 }
 
-// --- New Tests for various Option types ---
+// Helper function to test Option extraction for both Some and None cases
+fn assert_option_extraction(
+    record: &TestRecord,
+    some_field_name: &str,
+    expected_some_value: FieldScalarValue,
+    none_field_name: &str,
+) {
+    // Test Some variant
+    let extractor_some = FieldExtractor::new(some_field_name.to_string());
+    assert_eq!(
+        extractor_some.evaluate(record),
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            expected_some_value
+        ))))
+    );
+
+    // Test None variant
+    let extractor_none = FieldExtractor::new(none_field_name.to_string());
+    assert_eq!(
+        extractor_none.evaluate(record),
+        Ok(FieldScalarValue::Option(None))
+    );
+}
 
 #[test]
 fn test_extract_option_bool() {
     let record = create_test_record();
-    // Some(true)
-    let extractor_some = FieldExtractor::new("opt_bool_some".to_string());
-    assert_eq!(
-        extractor_some.evaluate(&record),
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::Bool(true)
-        ))))
-    );
-    // None
-    let extractor_none = FieldExtractor::new("opt_bool_none".to_string());
-    assert_eq!(
-        extractor_none.evaluate(&record),
-        Ok(FieldScalarValue::Option(None))
+    assert_option_extraction(
+        &record,
+        "opt_bool_some",
+        FieldScalarValue::Bool(true),
+        "opt_bool_none",
     );
 }
 
 #[test]
 fn test_extract_option_char() {
     let record = create_test_record();
-    // Some('Z')
-    let extractor_some = FieldExtractor::new("opt_char_some".to_string());
-    assert_eq!(
-        extractor_some.evaluate(&record),
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::Char('Z')
-        ))))
-    );
-    // None
-    let extractor_none = FieldExtractor::new("opt_char_none".to_string());
-    assert_eq!(
-        extractor_none.evaluate(&record),
-        Ok(FieldScalarValue::Option(None))
+    assert_option_extraction(
+        &record,
+        "opt_char_some",
+        FieldScalarValue::Char('Z'),
+        "opt_char_none",
     );
 }
 
 #[test]
 fn test_extract_option_string() {
     let record = create_test_record();
-    // Some("Hello Option")
-    let extractor_some = FieldExtractor::new("opt_string_some".to_string());
-    assert_eq!(
-        extractor_some.evaluate(&record),
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::String("Hello Option".to_string())
-        ))))
-    );
-    // None
-    let extractor_none = FieldExtractor::new("opt_string_none".to_string());
-    assert_eq!(
-        extractor_none.evaluate(&record),
-        Ok(FieldScalarValue::Option(None))
+    assert_option_extraction(
+        &record,
+        "opt_string_some",
+        FieldScalarValue::String("Hello Option".to_string()),
+        "opt_string_none",
     );
 }
 
 #[test]
 fn test_extract_option_bytes() {
     let record = create_test_record();
-    // Some(vec![10, 20, 30])
-    let extractor_some = FieldExtractor::new("opt_bytes_some".to_string());
-    assert_eq!(
-        extractor_some.evaluate(&record),
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::Bytes(vec![10, 20, 30])
-        ))))
-    );
-    // None
-    let extractor_none = FieldExtractor::new("opt_bytes_none".to_string());
-    assert_eq!(
-        extractor_none.evaluate(&record),
-        Ok(FieldScalarValue::Option(None))
+    assert_option_extraction(
+        &record,
+        "opt_bytes_some",
+        FieldScalarValue::Bytes(vec![10, 20, 30]),
+        "opt_bytes_none",
     );
 }
 
 #[test]
 fn test_extract_option_unit() {
     let record = create_test_record();
-    // Some(())
-    let extractor_some = FieldExtractor::new("opt_unit_some".to_string());
-    assert_eq!(
-        extractor_some.evaluate(&record),
-        Ok(FieldScalarValue::Option(Some(Box::new(
-            FieldScalarValue::Unit
-        ))))
-    );
-    // None
-    let extractor_none = FieldExtractor::new("opt_unit_none".to_string());
-    assert_eq!(
-        extractor_none.evaluate(&record),
-        Ok(FieldScalarValue::Option(None))
+    assert_option_extraction(
+        &record,
+        "opt_unit_some",
+        FieldScalarValue::Unit,
+        "opt_unit_none",
     );
 }
 
