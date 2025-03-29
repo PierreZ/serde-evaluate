@@ -1,5 +1,8 @@
 use serde::Serialize;
-use serde_evaluate::{error::EvaluateError, value::FieldScalarValue};
+use serde_evaluate::{
+    error::EvaluateError, extractor::NestedFieldExtractor, value::FieldScalarValue,
+};
+use std::collections::BTreeMap;
 
 // Define nested structures for testing
 
@@ -43,6 +46,19 @@ struct Middle {
 struct Outer {
     middle: Middle,
     name: String,
+}
+
+#[derive(Serialize)]
+struct MapValueStruct {
+    value: i32,
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MapTestData {
+    id: String,
+    data_map: BTreeMap<String, MapValueStruct>,
+    simple_map: BTreeMap<String, u32>,
 }
 
 #[test]
@@ -178,7 +194,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
     let result_non_scalar = extractor_non_scalar.evaluate(&data);
     assert!(matches!(
         result_non_scalar,
-        Err(EvaluateError::UnsupportedType { .. })
+        Err(EvaluateError::UnsupportedType { type_name: _ })
     ));
 
     // Test path parsing errors handled by new_from_path
@@ -192,4 +208,112 @@ fn test_extract_deeply_nested_field_comprehensive() {
         ])
         .is_err()
     ); // Empty segment
+}
+
+#[test]
+fn test_extract_nested_map_field() {
+    // Prepare test data
+    let mut data_map = BTreeMap::new();
+    data_map.insert(
+        "entry1".to_string(),
+        MapValueStruct {
+            value: -10,
+            description: None,
+        },
+    );
+    data_map.insert(
+        "entry2".to_string(),
+        MapValueStruct {
+            value: 20,
+            description: Some("Second".to_string()),
+        },
+    );
+    let mut simple_map = BTreeMap::new();
+    simple_map.insert("simple1".to_string(), 100);
+    simple_map.insert("simple2".to_string(), 200);
+
+    let data = MapTestData {
+        id: "map_test_data".to_string(),
+        data_map,
+        simple_map,
+    };
+
+    // --- Success Cases ---
+
+    // Extract scalar from struct in map
+    let extractor1 = NestedFieldExtractor::new_from_path(&["data_map", "entry1", "value"]).unwrap();
+    let result1 = extractor1.evaluate(&data).unwrap();
+    assert_eq!(result1, FieldScalarValue::I32(-10));
+
+    // Extract Option<String> (Some) from struct in map
+    let extractor2 =
+        NestedFieldExtractor::new_from_path(&["data_map", "entry2", "description"]).unwrap();
+    let result2 = extractor2.evaluate(&data).unwrap();
+    assert_eq!(
+        result2,
+        FieldScalarValue::Option(Some(Box::new(FieldScalarValue::String(
+            "Second".to_string()
+        ))))
+    );
+
+    // Extract Option<String> (None) from struct in map
+    let extractor3 =
+        NestedFieldExtractor::new_from_path(&["data_map", "entry1", "description"]).unwrap();
+    let result3 = extractor3.evaluate(&data).unwrap();
+    assert_eq!(result3, FieldScalarValue::Option(None));
+
+    // Extract scalar from simple map
+    let extractor_simple = NestedFieldExtractor::new_from_path(&["simple_map", "simple2"]).unwrap();
+    let result_simple = extractor_simple.evaluate(&data).unwrap();
+    assert_eq!(result_simple, FieldScalarValue::U32(200));
+
+    // --- Error Cases ---
+
+    // Map key not found
+    let extractor_missing_key =
+        NestedFieldExtractor::new_from_path(&["data_map", "missing_key", "value"]).unwrap();
+    let result_missing_key = extractor_missing_key.evaluate(&data);
+    assert!(
+        matches!(result_missing_key, Err(EvaluateError::FieldNotFound { ref field_name }) if field_name == "data_map"),
+        "Unexpected result for missing key: {:?}",
+        result_missing_key
+    );
+
+    // Field not found within map value struct
+    let extractor_missing_inner =
+        NestedFieldExtractor::new_from_path(&["data_map", "entry1", "bad_field"]).unwrap();
+    let result_missing_inner = extractor_missing_inner.evaluate(&data);
+    assert!(
+        matches!(result_missing_inner, Err(EvaluateError::FieldNotFound { ref field_name }) if field_name == "data_map"),
+        "Unexpected result for missing inner field: {:?}",
+        result_missing_inner
+    );
+
+    // Try to extract map itself
+    let extractor_map = NestedFieldExtractor::new_from_path(&["data_map"]).unwrap();
+    let result_map = extractor_map.evaluate(&data);
+    assert!(
+        matches!(result_map, Err(EvaluateError::UnsupportedType { .. })),
+        "Unexpected result for extracting map: {:?}",
+        result_map
+    );
+
+    // Try to extract map value struct itself
+    let extractor_map_value = NestedFieldExtractor::new_from_path(&["data_map", "entry1"]).unwrap();
+    let result_map_value = extractor_map_value.evaluate(&data);
+    assert!(
+        matches!(result_map_value, Err(EvaluateError::UnsupportedType { .. })),
+        "Unexpected result for extracting map value: {:?}",
+        result_map_value
+    );
+
+    // Try to extract non-existent key from simple map
+    let extractor_simple_missing =
+        NestedFieldExtractor::new_from_path(&["simple_map", "missing"]).unwrap();
+    let result_simple_missing = extractor_simple_missing.evaluate(&data);
+    assert!(
+        matches!(result_simple_missing, Err(EvaluateError::FieldNotFound { ref field_name }) if field_name == "simple_map"),
+        "Unexpected result for missing simple key: {:?}",
+        result_simple_missing
+    );
 }

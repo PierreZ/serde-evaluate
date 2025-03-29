@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_evaluate::error::EvaluateError;
 use serde_evaluate::extractor::FieldExtractor;
 use serde_evaluate::value::FieldScalarValue;
+use std::collections::BTreeMap;
 
 // Define test-specific structs here (copied from lib.rs tests)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -38,6 +39,13 @@ struct TestRecord {
     opt_unit_some: Option<()>, // Note: () is the unit type
     opt_unit_none: Option<()>, // Note: () is the unit type
     opt_vec: Option<Vec<i32>>, // Option containing non-scalar
+}
+
+// New struct for map test
+#[derive(Serialize)]
+struct MapTestStruct {
+    id: i32,
+    my_map: BTreeMap<String, i32>,
 }
 
 fn create_test_record() -> TestRecord {
@@ -315,6 +323,28 @@ fn test_extract_option_non_scalar_vec() {
     assert!(
         matches!(result, Err(EvaluateError::UnsupportedType { type_name }) if type_name == "sequence"),
         "Expected UnsupportedType for Option<Vec>, got {:?}",
+        result
+    );
+}
+
+// New test for map field extraction attempt
+#[test]
+fn test_extract_map_field_unsupported() {
+    let mut map_data = BTreeMap::new();
+    map_data.insert("key1".to_string(), 1);
+    map_data.insert("key2".to_string(), 2);
+
+    let record = MapTestStruct {
+        id: 1,
+        my_map: map_data,
+    };
+
+    let extractor = FieldExtractor::new("my_map");
+    let result = extractor.evaluate(&record);
+
+    assert!(
+        matches!(result, Err(EvaluateError::UnsupportedType { .. })),
+        "Expected UnsupportedType error for map field, got {:?}",
         result
     );
 }

@@ -1,6 +1,6 @@
 use crate::error::EvaluateError;
 use crate::value::FieldScalarValue;
-use serde::ser::{self, SerializeStruct};
+use serde::ser::{self /*, SerializeStruct */}; // Removed unused import
 use serde::{Serialize, Serializer};
 
 // Define a dummy struct to handle skipping compound types
@@ -80,11 +80,12 @@ impl ser::SerializeSeq for Skip {
 // Custom Serializer Implementation Struct
 // This struct drives the serialization process, looking for the target field path.
 pub(crate) struct FieldValueExtractorSerializer {
-    path: Vec<String>,                // The full path to the target field
-    current_path_index: usize,        // Current index/depth in the path traversal
+    path: Vec<String>,                   // The full path to the target field
+    current_path_index: usize,           // Current index/depth in the path traversal
     capturing: bool, // True if the next value should be captured (at the final path segment)
     expecting_option_inner: bool, // True if inside a Some() variant and capturing
     result: Option<FieldScalarValue>, // Stores the final extracted value
+    current_map_key_match: Option<bool>, // Tracks if the current map key matched the path segment
 }
 
 // Implement helper methods for the serializer
@@ -113,6 +114,7 @@ impl FieldValueExtractorSerializer {
             capturing: false,      // Not capturing initially
             expecting_option_inner: false,
             result: None,
+            current_map_key_match: None, // Initialize map key match state
         }
     }
 
@@ -136,12 +138,6 @@ impl FieldValueExtractorSerializer {
                 // If capturing is true but index hasn't reached the end, it's an internal logic error
                 // in how capturing was set (likely in serialize_field or serialize_some).
                 // Reset flags defensively, but don't store the value.
-                eprintln!(
-                    "Warning: capture_value called while capturing=true but current_path_index ({}) != path.len() ({}). Path: {:?}",
-                    self.current_path_index,
-                    self.path.len(),
-                    self.path
-                );
                 self.capturing = false;
                 self.expecting_option_inner = false;
             }
@@ -164,7 +160,7 @@ impl Serializer for &mut FieldValueExtractorSerializer {
     type SerializeTuple = Skip;
     type SerializeTupleStruct = Skip;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeMap = Skip;
+    type SerializeMap = Self; // Use Self for map serialization
     type SerializeStruct = Self; // Use Self for struct serialization
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
@@ -380,13 +376,37 @@ impl Serializer for &mut FieldValueExtractorSerializer {
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        if self.capturing {
-            self.capturing = false;
-            Err(EvaluateError::UnsupportedType { type_name: "map" })
-        } else {
-            // Skip the map content if not capturing.
-            Ok(Skip)
+        // Check if we are at the end of the path and expecting a scalar
+        if self.path.is_empty() {
+            // Should not happen with NestedFieldExtractor
+            // This case indicates an internal inconsistency or misuse.
+            return Err(EvaluateError::FieldNotFound {
+                field_name: "<internal error: empty path>".to_string(),
+            });
         }
+        if self.current_path_index >= self.path.len() {
+            // Path exhausted, but we got a map. This is only valid if we are NOT capturing the final value.
+            // If we were capturing, it means the path pointed to a map, not a scalar.
+            if self.capturing {
+                // Path ended here, but it's a map, not a scalar.
+                self.capturing = false; // Stop capturing
+                return Err(EvaluateError::UnsupportedType {
+                    type_name: "map", // Path pointed to a map
+                });
+            } else {
+                // Path exhausted and not capturing, treat self as the SerializeMap state directly.
+                // This skips the map's content, which is correct.
+                return Ok(self);
+            }
+        }
+
+        // If we are here, current_path_index < path.len().
+        // We are expecting to traverse *into* this map.
+        // Ensure capturing is true because we need to process keys/values.
+        self.capturing = true;
+
+        // Okay to proceed, return self to handle map key/value pairs
+        Ok(self)
     }
 
     fn serialize_struct(
@@ -394,24 +414,20 @@ impl Serializer for &mut FieldValueExtractorSerializer {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        // If capturing, the target field cannot be a struct itself
-        if self.capturing {
-            // This should ideally not happen if logic is correct, as capturing should only be true
-            // when serialize_field encounters the *last* segment and serializes its value.
-            self.capturing = false;
-            eprintln!(
-                "Warning: serialize_struct called while capturing=true. Path: {:?}, Index: {}",
-                self.path, self.current_path_index
-            );
-            Err(EvaluateError::UnsupportedType {
-                type_name: "struct (at capture)",
-            })
-        } else if self.path.is_empty() || self.current_path_index >= self.path.len() {
-            // Path is exhausted or invalid, cannot proceed into struct meaningfully for extraction
-            // If path is empty, FieldNotFound(""). If index >= len, means traversal went wrong somewhere.
-            Err(EvaluateError::FieldNotFound {
-                field_name: self.path.join("."),
-            }) // Corrected construction
+        // Check if path is exhausted OR if we are capturing the final value
+        if self.current_path_index >= self.path.len() {
+            if self.capturing {
+                // Path exhausted, but we got a struct, and we are capturing.
+                // This means the final target path element pointed to a struct, not a scalar.
+                // Use capture_unsupported helper
+                self.capturing = false;
+                return Err(EvaluateError::UnsupportedType {
+                    type_name: "struct",
+                });
+            } else {
+                // Path is exhausted but not capturing. This is fine, we're just skipping.
+                Ok(self)
+            }
         } else {
             // Allow serialization to proceed into the struct's fields
             Ok(self)
@@ -434,16 +450,105 @@ impl Serializer for &mut FieldValueExtractorSerializer {
     }
 }
 
-// Implement SerializeStruct to handle fields within a struct.
-impl SerializeStruct for &mut FieldValueExtractorSerializer {
+// Implement SerializeMap to handle key-value pairs within a map.
+impl<'a> ser::SerializeMap for &'a mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
-    fn serialize_field<T: ?Sized + Serialize>(
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        // Check if we should even attempt to match the key
+        if !self.capturing || self.current_path_index >= self.path.len() {
+            self.current_map_key_match = Some(false);
+            return Ok(());
+        }
+
+        // Use StringKeySerializer to capture the key as a string
+        let mut key_serializer = StringKeySerializer { key: None };
+        key.serialize(&mut key_serializer)?;
+        let captured_key = key_serializer.key;
+        if let Some(key_str) = captured_key {
+            let expected_key = &self.path[self.current_path_index];
+            if key_str == *expected_key {
+                // Dereference expected_key
+                // Key matches the current path segment!
+                // Set flag, but DO NOT increment index here.
+                self.current_map_key_match = Some(true);
+            } else {
+                // Key does not match the current path segment
+                self.current_map_key_match = Some(false);
+            }
+        } else {
+            // Key was not a string, cannot match path segment
+            self.current_map_key_match = None; // Indicate key wasn't string/error
+        }
+        Ok(())
+    }
+
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        let key_match_status = self.current_map_key_match.take(); // Consume the match status
+
+        match key_match_status {
+            Some(true) => {
+                // Key matched! Serialize the value, advancing the path index for the nested call.
+                self.current_path_index += 1;
+                let res = value.serialize(&mut **self); // Recurse/capture
+                // Backtrack the index *after* the value serialization is complete.
+                self.current_path_index -= 1;
+                res?; // Propagate any errors from the value serialization
+            }
+            Some(false) | None => {
+                // Key did not match, wasn't a string, or error. Skip the value.
+                let mut dummy_serializer = FieldValueExtractorSerializer {
+                    path: vec![],
+                    current_path_index: 1, // Ensures path is considered "exhausted"
+                    result: None,
+                    capturing: false,
+                    expecting_option_inner: false, // Added default
+                    current_map_key_match: None,   // Added default
+                };
+                value.serialize(&mut dummy_serializer)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        // Check if path is exhausted *after* potential increment in serialize_key/value cycle
+        if self.current_path_index < self.path.len() {
+            // If we end a map but the path isn't exhausted, it's an error *if* we were capturing.
+            // This implies the path expected further nesting within one of the map values,
+            // but the correct key wasn't found or the value wasn't a traversable type.
+            if self.capturing {
+                let field_name_up_to_failure = self.path[..self.current_path_index].join(".");
+                return Err(EvaluateError::FieldNotFound {
+                    field_name: field_name_up_to_failure,
+                });
+            }
+            // If not capturing, ending the map early is fine (we were just skipping)
+        }
+        Ok(())
+    }
+}
+
+// Implement SerializeStruct to handle fields within a struct.
+impl<'a> ser::SerializeStruct for &'a mut FieldValueExtractorSerializer {
+    type Ok = ();
+    type Error = EvaluateError;
+
+    fn serialize_field<T: ?Sized>(
         &mut self,
         key: &'static str,
         value: &T,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
         // If we've already found the result, skip remaining fields.
         if self.result.is_some() {
             return Ok(());
@@ -503,5 +608,219 @@ impl SerializeStruct for &mut FieldValueExtractorSerializer {
         // The `into_result` method combined with initial state handles FieldNotFound.
         // Errors during traversal (e.g., UnsupportedType) are returned earlier.
         Ok(())
+    }
+}
+
+// Helper serializer to extract a string key
+struct StringKeySerializer {
+    key: Option<String>,
+}
+
+impl Serializer for &mut StringKeySerializer {
+    type Ok = ();
+    type Error = EvaluateError;
+    // Implement only the methods needed to capture a string
+    type SerializeSeq = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTuple = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
+
+    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        self.key = Some(v.to_string());
+        Ok(())
+    }
+
+    // Return error for any other type attempted as key
+    fn serialize_bool(self, _v: bool) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_i16(self, _v: i16) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_i32(self, _v: i32) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_i64(self, _v: i64) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_i128(self, _v: i128) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_u8(self, _v: u8) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_u16(self, _v: u16) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_u32(self, _v: u32) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_u64(self, _v: u64) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_u128(self, _v: u128) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_char(self, _v: char) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_some<T: ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error>
+    where
+        T: Serialize,
+    {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_newtype_struct<T: ?Sized>(
+        self,
+        _name: &'static str,
+        _value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: Serialize,
+    {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_newtype_variant<T: ?Sized>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: Serialize,
+    {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
+    }
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "Map key must be a string",
+        })
     }
 }
