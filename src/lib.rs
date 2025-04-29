@@ -33,6 +33,9 @@ pub enum FieldScalarValue {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum EvaluateError {
+    #[error("Field '{field_name}' not found in the struct")]
+    FieldNotFound { field_name: String },
+
     #[error("Unsupported type for scalar extraction: {type_name}")]
     UnsupportedType { type_name: &'static str },
 
@@ -42,10 +45,6 @@ pub enum EvaluateError {
     // Catch-all for custom messages from serde::ser::Error::custom
     #[error("Serialization error: {message}")]
     SerializationError { message: String },
-
-    // Error returned by the main evaluate function
-    #[error("Field not found or has an unsupported type: {field_name}")]
-    FieldNotFound { field_name: String },
 }
 
 impl SerdeError for EvaluateError {
@@ -59,18 +58,31 @@ impl SerdeError for EvaluateError {
 // Custom Serializer Implementation Struct
 struct FieldValueExtractorSerializer<'a> {
     target_field_name: &'a str,
-    result: Option<FieldScalarValue>,
-    capturing: bool,              // True if the next value should be captured
-    expecting_option_inner: bool, // True if inside a Some() variant and capturing
+    capturing: bool,                  // True if the next value should be captured
+    expecting_option_inner: bool,     // True if inside a Some() variant and capturing
+    result: Option<FieldScalarValue>, // Stores the final extracted value
 }
 
 impl<'a> FieldValueExtractorSerializer<'a> {
     fn new(field_name: &'a str) -> Self {
         FieldValueExtractorSerializer {
             target_field_name: field_name,
-            result: None,
             capturing: false,
             expecting_option_inner: false,
+            result: None,
+        }
+    }
+
+    // Helper to capture a value if the flag is set, handling Option wrapping.
+    fn capture_value(&mut self, value: FieldScalarValue) {
+        if self.capturing {
+            self.result = if self.expecting_option_inner {
+                Some(FieldScalarValue::Option(Some(Box::new(value))))
+            } else {
+                Some(value)
+            };
+            self.capturing = false;
+            self.expecting_option_inner = false; // Always reset this after capture
         }
     }
 }
@@ -90,281 +102,114 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
     type SerializeStruct = Self; // Use Self for struct serialization
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
-    // --- Capture Methods ---
-    // These methods check the `capturing` flag and store the value if set.
-
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::Bool(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::Bool(v));
-            }
-            self.capturing = false;
-        }
+        self.capture_value(FieldScalarValue::Bool(v));
         Ok(FieldScalarValue::Unit)
     }
 
-    // Integers - Capture as i32 or u64 based on what fits
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::I8(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::I8(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::I16(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::I16(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::I32(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::I32(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::I64(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::I64(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_i128(self, v: i128) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::I128(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::I128(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::U8(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::U8(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::U16(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::U16(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::U32(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::U32(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::U64(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::U64(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::U128(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::U128(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::F32(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::F32(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::F64(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::F64(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::Char(v),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::Char(v));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::String(v.to_string()),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::String(v.to_string()));
-            }
-            self.capturing = false;
-        }
-        Ok(FieldScalarValue::Unit)
-    }
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::Bytes(v.to_vec()),
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::Bytes(v.to_vec()));
-            }
-            self.capturing = false;
-        }
+        self.capture_value(FieldScalarValue::I8(v));
         Ok(FieldScalarValue::Unit)
     }
 
-    // Option types
+    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::I16(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::I32(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::I64(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_i128(self, v: i128) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::I128(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::U8(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::U16(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::U32(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::U64(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::U128(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::F32(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::F64(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::Char(v));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::String(v.to_string()));
+        Ok(FieldScalarValue::Unit)
+    }
+
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        self.capture_value(FieldScalarValue::Bytes(v.to_vec()));
+        Ok(FieldScalarValue::Unit)
+    }
+
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         if self.capturing {
-            // Capturing an explicit None for the target field
             self.result = Some(FieldScalarValue::Option(None));
             self.capturing = false;
             self.expecting_option_inner = false; // Reset flag just in case
         }
         Ok(FieldScalarValue::Unit)
     }
+
     fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
         if self.capturing {
-            // We are capturing the target field, and it's a Some. Mark that
-            // the *next* primitive we capture should be boxed inside Option(Some(...)).
-            // Keep capturing = true, as the actual value is inside.
             self.expecting_option_inner = true;
         }
         // Always serialize the inner value regardless of capturing state
-        let result = value.serialize(self);
-        // expecting_option_inner should be reset by the inner serialize_* call
-        // We don't reset capturing here, it's reset by the caller (serialize_field)
-        result // Return result (Ok or Err) from inner serialization
+        let result = value.serialize(&mut *self);
+        self.expecting_option_inner = false; // Reset flag
+        result
     }
 
-    // Unit types
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        if self.capturing {
-            if self.expecting_option_inner {
-                // Option<Option<()>> -> Option(Some(Box(Unit))) ? or Option(None) if inner is None?
-                // Let's assume Option<()> -> Option(Some(Box(Unit))) for Some(()) for now.
-                self.result = Some(FieldScalarValue::Option(Some(Box::new(
-                    FieldScalarValue::Unit,
-                ))));
-                self.expecting_option_inner = false;
-            } else {
-                self.result = Some(FieldScalarValue::Unit);
-            }
-            self.capturing = false;
-        }
+        self.capture_value(FieldScalarValue::Unit);
         Ok(FieldScalarValue::Unit)
     }
+
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        // Treat struct units like primitive units
         self.serialize_unit()
     }
+
     fn serialize_unit_variant(
         self,
         _name: &'static str,
@@ -374,19 +219,19 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         Ok(FieldScalarValue::Unit)
     }
 
-    // Newtype structs/variants
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        // Treat like Option: serialize inner value if capturing.
         if self.capturing {
-            value.serialize(self)
+            value.serialize(&mut *self)
         } else {
-            Ok(FieldScalarValue::Unit) // Not capturing, do nothing.
+            value.serialize(&mut *self)?;
+            Ok(FieldScalarValue::Unit)
         }
     }
+
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
@@ -394,19 +239,12 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         _variant: &'static str,
         _value: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        // Variants are complex, error out for now.
-        if self.capturing {
-            self.capturing = false;
-        }
         Err(EvaluateError::UnsupportedVariant {
             variant_type: "newtype",
         })
     }
 
-    // --- Compound Types (Not needed for single field extraction) ---
-    // Return errors or impossible types for seq, tuple, map as we don't extract from them directly.
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        // If capturing, this means the target field is a sequence, which isn't a scalar.
         if self.capturing {
             self.capturing = false;
         }
@@ -414,12 +252,14 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
             type_name: "sequence",
         })
     }
+
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         if self.capturing {
             self.capturing = false;
         }
         Err(EvaluateError::UnsupportedType { type_name: "tuple" })
     }
+
     fn serialize_tuple_struct(
         self,
         _name: &'static str,
@@ -432,6 +272,7 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
             type_name: "tuple struct",
         })
     }
+
     fn serialize_tuple_variant(
         self,
         _name: &'static str,
@@ -446,6 +287,7 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
             variant_type: "tuple",
         })
     }
+
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         if self.capturing {
             self.capturing = false;
@@ -453,14 +295,11 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         Err(EvaluateError::UnsupportedType { type_name: "map" })
     }
 
-    // --- Struct Entry Point ---
     fn serialize_struct(
         self,
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        // This is the main entry point for structs like MyRecord.
-        // Return `Ok(self)` so the struct's fields will be processed by `SerializeStruct`.
         Ok(self)
     }
 
@@ -490,25 +329,18 @@ impl<'a> SerializeStruct for &'a mut FieldValueExtractorSerializer<'_> {
     where
         T: ?Sized + Serialize,
     {
-        // Only process if we haven't already found and stored the result.
         if self.result.is_none() {
-            // Check if this is the field we are looking for
             if key == self.target_field_name {
-                self.capturing = true; // Set flag: capture the *next* value serialized
-                // Serialize the value. This will call one of the `serialize_*` methods above,
-                // which should capture the value and reset `capturing` to false.
+                self.capturing = true;
                 value.serialize(&mut **self)?;
-                self.capturing = false; // Ensure capturing is always reset
+                self.capturing = false;
             }
         }
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        // The struct serialization is done, but the actual result is captured
-        // in the main serializer. We need to return *something* matching Self::Ok.
-        // This value is effectively ignored.
-        Ok(FieldScalarValue::Unit) // Return a dummy value
+        Ok(FieldScalarValue::Unit)
     }
 }
 
@@ -527,20 +359,12 @@ impl FieldExtractor {
     pub fn evaluate<T: Serialize>(&self, record: &T) -> Result<FieldScalarValue, EvaluateError> {
         let mut serializer = FieldValueExtractorSerializer::new(&self.field_name);
         match record.serialize(&mut serializer) {
-            Ok(_) => {
-                // Serialization completed without hitting unsupported types directly.
-                // Check what the serializer captured.
-                // If a result was captured, return it. Otherwise, the field wasn't found/captured.
-                serializer
-                    .result
-                    .ok_or_else(|| EvaluateError::FieldNotFound {
-                        field_name: self.field_name.clone(),
-                    })
-            }
-            Err(e) => {
-                // Propagate errors encountered during serialization
-                Err(e)
-            }
+            Ok(_) => serializer
+                .result
+                .ok_or_else(|| EvaluateError::FieldNotFound {
+                    field_name: self.field_name.clone(),
+                }),
+            Err(e) => Err(e),
         }
     }
 }
