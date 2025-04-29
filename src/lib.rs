@@ -151,7 +151,12 @@
 //! sequences (except `Vec<u8` with `serde_bytes`), maps, or enums with data will result in an
 //! `EvaluateError::UnsupportedType`. Similarly, if any intermediate part of the path
 //! (e.g., `middle` in `top.middle.leaf`) is not a struct or a map, extraction will fail.
-
+//!
+//! **Note:** While `Option<Scalar>` fields can be extracted directly (yielding `FieldScalarValue::Option(Some(scalar))`
+//! or `FieldScalarValue::Option(None)`), traversing *through* an `Option` to access fields within the `Some` variant
+//! (e.g., `opt_struct.inner_field`) is currently **not supported**. The extraction path must target the `Option` itself.
+//!
+//!
 // Declare modules
 pub mod error;
 pub mod extractor;
