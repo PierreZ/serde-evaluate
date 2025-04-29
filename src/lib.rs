@@ -2,32 +2,13 @@ pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde::{
     Serializer,
     ser::{Error as SerdeError, SerializeStruct},
 };
 use std::fmt;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MyRecord {
-    pub id: u64,
-    pub name: String,
-    pub value: Option<i32>,
-    pub tags: Vec<String>,
-    pub nested: Option<NestedData>,
-    pub temperature: f32,
-    pub initial: char,
-    #[serde(with = "serde_bytes")]
-    pub data_bytes: Vec<u8>,
-    pub marker: (),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NestedData {
-    pub timestamp: u64,
-    pub description: String,
-}
+use thiserror::Error;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum FieldScalarValue {
@@ -54,20 +35,28 @@ pub enum FieldScalarValue {
     None, // Represents Option::None explicitly
 }
 
-#[derive(Debug)]
-struct ExtractionError(String);
+#[derive(Error, Debug, PartialEq)]
+pub enum EvaluateError {
+    #[error("Unsupported type for scalar extraction: {type_name}")]
+    UnsupportedType { type_name: &'static str },
 
-impl fmt::Display for ExtractionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Extraction Error: {}", self.0)
-    }
+    #[error("Extracting from enum variants not supported: {variant_type}")]
+    UnsupportedVariant { variant_type: &'static str },
+
+    // Catch-all for custom messages from serde::ser::Error::custom
+    #[error("Serialization error: {message}")]
+    SerializationError { message: String },
+
+    // Error returned by the main evaluate function
+    #[error("Field not found or has an unsupported type: {field_name}")]
+    FieldNotFound { field_name: String },
 }
 
-impl std::error::Error for ExtractionError {}
-
-impl serde::ser::Error for ExtractionError {
+impl SerdeError for EvaluateError {
     fn custom<T: fmt::Display>(msg: T) -> Self {
-        ExtractionError(msg.to_string())
+        EvaluateError::SerializationError {
+            message: msg.to_string(),
+        }
     }
 }
 
@@ -92,7 +81,7 @@ impl<'a> FieldValueExtractorSerializer<'a> {
 // Note: Many methods can be stubbed out or return Ok(()) as we only care about capturing one value.
 impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
     type Ok = ();
-    type Error = ExtractionError; // Use our custom error type
+    type Error = EvaluateError; // Use our custom error type
 
     // We only care about struct serialization for top-level extraction
     type SerializeSeq = serde::ser::Impossible<(), Self::Error>;
@@ -281,9 +270,9 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom(
-            "Extracting from newtype variants not supported",
-        ))
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "newtype",
+        })
     }
 
     // --- Compound Types (Not needed for single field extraction) ---
@@ -293,15 +282,15 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom(
-            "Cannot extract sequence as scalar value",
-        ))
+        Err(EvaluateError::UnsupportedType {
+            type_name: "sequence",
+        })
     }
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom("Cannot extract tuple as scalar value"))
+        Err(EvaluateError::UnsupportedType { type_name: "tuple" })
     }
     fn serialize_tuple_struct(
         self,
@@ -311,9 +300,9 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom(
-            "Cannot extract tuple struct as scalar value",
-        ))
+        Err(EvaluateError::UnsupportedType {
+            type_name: "tuple struct",
+        })
     }
     fn serialize_tuple_variant(
         self,
@@ -325,15 +314,15 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom(
-            "Extracting from tuple variants not supported",
-        ))
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "tuple",
+        })
     }
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom("Cannot extract map as scalar value"))
+        Err(EvaluateError::UnsupportedType { type_name: "map" })
     }
 
     // --- Struct Entry Point ---
@@ -357,9 +346,9 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
         if self.capturing {
             self.capturing = false;
         }
-        Err(SerdeError::custom(
-            "Extracting from struct variants not supported",
-        ))
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "struct",
+        })
     }
 }
 
@@ -367,7 +356,7 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer<'_> {
 // This handles individual fields within a struct
 impl<'a> SerializeStruct for &'a mut FieldValueExtractorSerializer<'_> {
     type Ok = ();
-    type Error = ExtractionError;
+    type Error = EvaluateError;
 
     fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
@@ -420,31 +409,51 @@ impl FieldExtractor {
     }
 
     // 3. Evaluation Method (Implementation using the custom serializer)
-    pub fn evaluate<T: Serialize>(&self, record: &T) -> Result<FieldScalarValue, String> {
+    pub fn evaluate<T: Serialize>(&self, record: &T) -> Result<FieldScalarValue, EvaluateError> {
         let mut serializer = FieldValueExtractorSerializer::new(&self.field_name);
         match record.serialize(&mut serializer) {
             Ok(_) => {
                 // Serialization succeeded, check if the serializer captured a result
                 serializer.result.ok_or_else(|| {
                     // If no result was captured, the field wasn't found or wasn't a supported scalar type
-                    format!(
-                        "Field '{}' not found or has an unsupported type.",
-                        self.field_name
-                    )
+                    EvaluateError::FieldNotFound {
+                        field_name: self.field_name.clone(),
+                    }
                 })
             }
             Err(e) => {
                 // Serialization itself failed (e.g., trying to extract a non-scalar like a sequence)
-                Err(format!("Extraction failed: {}", e))
+                Err(e)
             }
         }
     }
 }
 
-// 7. Testing
 #[cfg(test)]
 mod tests {
-    use super::*; // Make sure MyRecord, etc. are in scope
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    // Define test-specific structs here
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    struct MyRecord {
+        id: u64,
+        name: String,
+        value: Option<i32>,
+        tags: Vec<String>,
+        nested: Option<NestedData>,
+        temperature: f32,
+        initial: char,
+        #[serde(with = "serde_bytes")]
+        data_bytes: Vec<u8>,
+        marker: (),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    struct NestedData {
+        timestamp: u64,
+        description: String,
+    }
 
     // Helper to create a standard record for tests
     fn create_test_record() -> MyRecord {
@@ -512,10 +521,8 @@ mod tests {
         let record = create_test_record();
         let extractor = FieldExtractor::new("non_existent_field".to_string());
         let result = extractor.evaluate(&record);
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "Field 'non_existent_field' not found or has an unsupported type."
+        assert!(
+            matches!(result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "non_existent_field")
         );
     }
 
@@ -525,10 +532,9 @@ mod tests {
         let record = create_test_record();
         let extractor = FieldExtractor::new("tags".to_string());
         let result = extractor.evaluate(&record);
-        assert!(result.is_err());
-        // The exact error might vary slightly depending on implementation details,
-        // but it should indicate failure due to non-scalar type or related Serde error.
-        assert!(result.unwrap_err().starts_with("Extraction failed:")); // Error comes from serialize_seq
+        assert!(
+            matches!(result, Err(EvaluateError::UnsupportedType { type_name }) if type_name == "sequence")
+        );
     }
 
     #[test]
@@ -537,18 +543,8 @@ mod tests {
         let record = create_test_record();
         let extractor = FieldExtractor::new("nested".to_string());
         let result = extractor.evaluate(&record);
-        assert!(result.is_err());
-        // If nested is Some(NestedData{...}), serialize_some will try to serialize NestedData.
-        // serialize_struct will be called, returning Ok(self).
-        // Then serialize_field for "timestamp" will be called. If *that* isn't the target,
-        // it proceeds. Eventually, serialize_field for the target "nested" triggers capturing=true,
-        // value.serialize(&mut **self) calls serialize_some, which calls serialize on NestedData.
-        // This calls serialize_struct again *within* the capture context.
-        // The current implementation results in `result` being None because serialize_struct doesn't set it,
-        // leading to the "not found or unsupported type" error from evaluate().
-        assert_eq!(
-            result.unwrap_err(),
-            "Field 'nested' not found or has an unsupported type."
+        assert!(
+            matches!(result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "nested")
         );
     }
 
