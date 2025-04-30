@@ -121,8 +121,8 @@ impl NestedFieldExtractor {
         // After serialization, check if the serializer captured a result.
         serializer
             .into_result()
-            .ok_or_else(|| EvaluateError::FieldNotFound {
-                field_name: self.path_segments.join("."),
+            .ok_or_else(|| EvaluateError::NestedFieldNotFound {
+                path: self.path_segments.clone(),
             })
     }
 }

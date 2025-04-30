@@ -518,19 +518,8 @@ impl ser::SerializeMap for &mut FieldValueExtractorSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        // Check if path is exhausted *after* potential increment in serialize_key/value cycle
-        if self.current_path_index < self.path.len() {
-            // If we end a map but the path isn't exhausted, it's an error *if* we were capturing.
-            // This implies the path expected further nesting within one of the map values,
-            // but the correct key wasn't found or the value wasn't a traversable type.
-            if self.capturing {
-                let field_name_up_to_failure = self.path[..self.current_path_index].join(".");
-                return Err(EvaluateError::FieldNotFound {
-                    field_name: field_name_up_to_failure,
-                });
-            }
-            // If not capturing, ending the map early is fine (we were just skipping)
-        }
+        // No error checking needed here. The extractor will determine if the
+        // full path was successfully resolved by checking the final result.
         Ok(())
     }
 }

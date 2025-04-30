@@ -11,6 +11,13 @@ pub enum EvaluateError {
         field_name: String,
     },
 
+    /// The target nested field specified by the path was not found.
+    #[error("Nested field path '{}' not found", path.join("."))]
+    NestedFieldNotFound {
+        /// The full path segments that were not found.
+        path: Vec<String>,
+    },
+
     /// An intermediate part of the path pointed to a non-struct type.
     #[error("Cannot traverse non-struct type at path segment: {0}")]
     NotAStruct(String),

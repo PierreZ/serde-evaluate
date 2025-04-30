@@ -105,20 +105,29 @@
 //!     let missing_result = FieldExtractor::new("address").evaluate(&data);
 //!     assert!(matches!(missing_result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "address"));
 //!
-//!     // Trying to extract a non-existent nested field returns FieldNotFound (with path up to failure)
+//!     // Trying to extract a non-existent nested field returns NestedFieldNotFound (with path up to failure)
 //!     let missing_nested_extractor = NestedFieldExtractor::new_from_path(&["nested", "bad_field"])?;
 //!     let missing_nested_result = missing_nested_extractor.evaluate(&data);
-//!     assert!(matches!(missing_nested_result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "nested.bad_field"));
+//!     assert!(matches!(
+//!         missing_nested_result,
+//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["nested".to_string(), "bad_field".to_string()]
+//!     ));
 //!
-//!     // Trying to extract from a non-existent map key returns FieldNotFound (with path up to failure)
+//!     // Trying to extract from a non-existent map key returns NestedFieldNotFound (with path up to failure)
 //!     let missing_map_key_extractor = NestedFieldExtractor::new_from_path(&["data_map", "missing_key", "value"])?;
 //!     let missing_map_key_result = missing_map_key_extractor.evaluate(&data);
-//!     assert!(matches!(missing_map_key_result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "data_map"));
+//!     assert!(matches!(
+//!         missing_map_key_result,
+//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "missing_key".to_string(), "value".to_string()]
+//!     ));
 //!
-//!     // Trying to extract a non-existent field within a valid map entry returns FieldNotFound (with path up to map)
+//!     // Trying to extract a non-existent field within a valid map entry returns NestedFieldNotFound (with path up to failure)
 //!     let missing_map_inner_extractor = NestedFieldExtractor::new_from_path(&["data_map", "entry1", "bad_field"])?;
 //!     let missing_map_inner_result = missing_map_inner_extractor.evaluate(&data);
-//!     assert!(matches!(missing_map_inner_result, Err(EvaluateError::FieldNotFound { field_name }) if field_name == "data_map"));
+//!     assert!(matches!(
+//!         missing_map_inner_result,
+//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "entry1".to_string(), "bad_field".to_string()]
+//!     ));
 //!
 //!     // Trying to extract a non-scalar field (struct) itself returns UnsupportedType
 //!     let nested_struct_extractor = NestedFieldExtractor::new_from_path(&["nested"])?;
