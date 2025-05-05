@@ -7,6 +7,16 @@
 //! The extracted value is returned as a `FieldScalarValue` enum, which covers
 //! common scalar types (integers, floats, bool, string, char, bytes, unit, and options of these).
 //!
+//! ## Features
+//!
+//! *   **Extract Scalar Fields:** Retrieve basic scalar types (integers, floats, bool, char, String) from any level of a struct or map.
+//! *   **Nested Field Access:** Access fields within nested structs or maps using dot (`.`) or index (`[key]`) notation (e.g., `"outer.inner.field"`, `"map[key].field"`).
+//! *   **Option Handling:**
+//!     *   `Option<Scalar>`: Correctly extracts as `Some(Scalar)` or `None`.
+//!     *   `Option<Option<Scalar>>`: Extracts nested `Option` types (e.g., `Some(Some(Scalar))`, `Some(None)`, `None`).
+//! *   **Bytes Support:** Extracts `Vec<u8>` when annotated with `#[serde(with = "serde_bytes")]`.
+//! *   **Error Handling:** Returns specific errors for unsupported types (`UnsupportedType`) or missing fields (`FieldNotFound`, `NestedFieldNotFound`).
+//!
 //! ## How it Works
 //!
 //! It uses a custom Serde `Serializer` (`FieldValueExtractorSerializer`) that intercepts
@@ -141,8 +151,7 @@
 //!
 //!     Ok(())
 //! }
-//! ```
-//!
+//! 
 //! ## Supported Types
 //!
 //! The final target of the extraction path must be one of the following types
