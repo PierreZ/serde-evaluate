@@ -236,7 +236,7 @@ impl Serializer for &mut FieldValueExtractorSerializer {
             self.option_nesting_level =
                 original_level
                     .checked_add(1)
-                    .ok_or_else(|| EvaluateError::UnsupportedType {
+                    .ok_or(EvaluateError::UnsupportedType {
                         type_name: "Deeply Nested Option (>255 levels)",
                     })?;
             let result = value.serialize(&mut *self); // Serialize the inner value
