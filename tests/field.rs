@@ -298,3 +298,115 @@ fn test_extract_map_field_unsupported() {
         result
     );
 }
+
+#[test]
+fn test_nested_option_u32_some_some() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_u32: Option<Option<u32>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_u32: Some(Some(123u32)),
+    };
+
+    let result = FieldExtractor::new("nested_option_u32").evaluate(&test_struct);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(Some(Box::new(FieldScalarValue::U32(123))))
+        ))))
+    );
+}
+
+#[test]
+fn test_nested_option_u32_some_none() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_u32: Option<Option<u32>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_u32: Some(None),
+    };
+
+    let result = FieldExtractor::new("nested_option_u32").evaluate(&test_struct);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(None)
+        ))))
+    );
+}
+
+#[test]
+fn test_nested_option_u32_none() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_u32: Option<Option<u32>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_u32: None,
+    };
+
+    let result = FieldExtractor::new("nested_option_u32").evaluate(&test_struct);
+    assert_eq!(result, Ok(FieldScalarValue::Option(None)));
+}
+
+#[test]
+fn test_nested_option_string_some_some() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_string: Option<Option<String>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_string: Some(Some("hello".to_string())),
+    };
+
+    let result = FieldExtractor::new("nested_option_string").evaluate(&test_struct);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(Some(Box::new(FieldScalarValue::String(
+                "hello".to_string()
+            ))))
+        ))))
+    );
+}
+
+#[test]
+fn test_nested_option_string_some_none() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_string: Option<Option<String>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_string: Some(None),
+    };
+
+    let result = FieldExtractor::new("nested_option_string").evaluate(&test_struct);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(None)
+        ))))
+    );
+}
+
+#[test]
+fn test_nested_option_string_none() {
+    #[derive(Serialize)]
+    struct TestStruct {
+        nested_option_string: Option<Option<String>>,
+    }
+
+    let test_struct = TestStruct {
+        nested_option_string: None,
+    };
+
+    let result = FieldExtractor::new("nested_option_string").evaluate(&test_struct);
+    assert_eq!(result, Ok(FieldScalarValue::Option(None)));
+}
