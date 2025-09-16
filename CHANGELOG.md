@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/PierreZ/serde-evaluate/compare/v0.1.1...v0.1.2) - 2025-09-16
+
+### Other
+
+- *(deps)* bump serde from 1.0.219 to 1.0.223
+- *(deps)* bump thiserror from 2.0.12 to 2.0.16
+- *(deps)* bump actions/checkout from 4 to 5
+
 ## [0.1.1](https://github.com/PierreZ/serde-evaluate/compare/v0.1.0...v0.1.1) - 2025-05-05
 
 ### Fixed
