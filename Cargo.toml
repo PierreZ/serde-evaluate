@@ -13,7 +13,7 @@ keywords = ["serde", "serialization", "extraction", "evaluate", "field"]
 categories = ["encoding", "data-structures"]
 
 [dependencies]
-serde = { version = "1.0.214", features = ["derive"] }
+serde = { version = "1.0.225", features = ["derive"] }
 serde_bytes = "0.11.10"
 thiserror = "2.0.16"
 
