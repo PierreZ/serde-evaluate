@@ -14,7 +14,7 @@ categories = ["encoding", "data-structures"]
 
 [dependencies]
 serde = { version = "1.0.225", features = ["derive"] }
-serde_bytes = "0.11.10"
+serde_bytes = "0.11.19"
 thiserror = "2.0.16"
 
 [dev-dependencies]
