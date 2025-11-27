@@ -10,15 +10,27 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+   groups:
+     devcontainer-dependencies:
+       patterns:
+         - "*"
 
   # Keep rust dependencies up to date
  - package-ecosystem: "cargo"
    directory: "/"
    schedule:
      interval: weekly
+   groups:
+     rust-dependencies:
+       patterns:
+         - "*"
 
   # Keep GitHub actions up to date
  - package-ecosystem: "github-actions"
    directory: "/"
    schedule:
      interval: weekly
+   groups:
+     github-actions-dependencies:
+       patterns:
+         - "*"
