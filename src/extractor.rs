@@ -200,7 +200,10 @@ impl ListFieldExtractor {
     /// Returns `EvaluateError` if:
     /// * The `field_name` is not found in the `record` ([`EvaluateError::FieldNotFound`]).
     /// * The list elements are not scalar types ([`EvaluateError::UnsupportedType`]).
-    pub fn evaluate<T: Serialize>(&self, record: &T) -> Result<Vec<FieldScalarValue>, EvaluateError> {
+    pub fn evaluate<T: Serialize>(
+        &self,
+        record: &T,
+    ) -> Result<Vec<FieldScalarValue>, EvaluateError> {
         let mut serializer = FieldValueExtractorSerializer::new_list(&self.field_name);
         record.serialize(&mut serializer)?;
 
@@ -307,7 +310,10 @@ impl NestedListFieldExtractor {
     /// Returns `EvaluateError` if:
     /// * The path is not found ([`EvaluateError::NestedFieldNotFound`]).
     /// * The list elements are not scalar types ([`EvaluateError::UnsupportedType`]).
-    pub fn evaluate<T: Serialize>(&self, value: &T) -> Result<Vec<FieldScalarValue>, EvaluateError> {
+    pub fn evaluate<T: Serialize>(
+        &self,
+        value: &T,
+    ) -> Result<Vec<FieldScalarValue>, EvaluateError> {
         let mut serializer =
             FieldValueExtractorSerializer::new_nested_list(self.path_segments.clone());
         value.serialize(&mut serializer)?;

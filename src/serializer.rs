@@ -374,7 +374,9 @@ impl Serializer for &mut ScalarCaptureSerializer {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Err(EvaluateError::UnsupportedType { type_name: "struct" })
+        Err(EvaluateError::UnsupportedType {
+            type_name: "struct",
+        })
     }
 
     fn serialize_struct_variant(

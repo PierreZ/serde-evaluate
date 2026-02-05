@@ -50,7 +50,11 @@ struct RecordWithNestedList {
 fn create_simple_record() -> SimpleRecord {
     SimpleRecord {
         id: 1,
-        tags: vec!["rust".to_string(), "serde".to_string(), "evaluate".to_string()],
+        tags: vec![
+            "rust".to_string(),
+            "serde".to_string(),
+            "evaluate".to_string(),
+        ],
         scores: vec![100, 200, 300],
         empty_list: vec![],
         optional_tags: Some(vec!["opt1".to_string(), "opt2".to_string()]),

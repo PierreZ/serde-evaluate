@@ -313,10 +313,10 @@ pub mod value;
 pub use error::EvaluateError;
 /// Public interface for extracting top-level scalar field values.
 pub use extractor::FieldExtractor;
-/// Public interface for extracting nested scalar field values.
-pub use extractor::NestedFieldExtractor;
 /// Public interface for extracting list of scalar values from a Vec<T> field.
 pub use extractor::ListFieldExtractor;
+/// Public interface for extracting nested scalar field values.
+pub use extractor::NestedFieldExtractor;
 /// Public interface for extracting list of scalar values from a nested Vec<T> field.
 pub use extractor::NestedListFieldExtractor;
 /// Enum representing the possible scalar values that can be extracted.
