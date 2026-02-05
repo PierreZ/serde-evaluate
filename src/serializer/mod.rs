@@ -11,7 +11,17 @@
 // Macros for reducing repetitive serialize method implementations
 // =============================================================================
 
-/// Macro for ScalarCaptureSerializer: sets self.value directly.
+/// Generates scalar serialize methods for `ScalarCaptureSerializer`.
+///
+/// Each method sets `self.value` to the corresponding `FieldScalarValue` variant.
+///
+/// # Usage
+/// ```ignore
+/// impl_scalar_capture_methods! {
+///     serialize_bool(bool) => Bool,
+///     serialize_i32(i32) => I32,
+/// }
+/// ```
 macro_rules! impl_scalar_capture_methods {
     ($($method:ident($ty:ty) => $variant:ident),* $(,)?) => {
         $(
@@ -23,7 +33,17 @@ macro_rules! impl_scalar_capture_methods {
     };
 }
 
-/// Macro for FieldValueExtractorSerializer: calls capture_value().
+/// Generates scalar serialize methods for `FieldValueExtractorSerializer`.
+///
+/// Each method calls `capture_value()` with the corresponding `FieldScalarValue` variant.
+///
+/// # Usage
+/// ```ignore
+/// impl_extractor_capture_methods! {
+///     serialize_bool(bool) => Bool,
+///     serialize_i32(i32) => I32,
+/// }
+/// ```
 macro_rules! impl_extractor_capture_methods {
     ($($method:ident($ty:ty) => $variant:ident),* $(,)?) => {
         $(
@@ -34,7 +54,18 @@ macro_rules! impl_extractor_capture_methods {
     };
 }
 
-/// Macro for StringKeySerializer: returns "Map key must be a string" error.
+/// Generates rejection methods for `StringKeySerializer`.
+///
+/// Each method returns an `UnsupportedType` error since map keys must be strings.
+///
+/// # Usage
+/// ```ignore
+/// impl_key_reject_methods! {
+///     serialize_bool(bool),
+///     serialize_i32(i32),
+///     serialize_unit(),
+/// }
+/// ```
 macro_rules! impl_key_reject_methods {
     ($($method:ident($($ty:ty),*)),* $(,)?) => {
         $(

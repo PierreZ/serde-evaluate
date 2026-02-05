@@ -6,8 +6,8 @@ use crate::error::EvaluateError;
 use serde::{Serialize, Serializer};
 
 /// Helper serializer to extract a string key from map serialization.
-pub(crate) struct StringKeySerializer {
-    pub(crate) key: Option<String>,
+pub(super) struct StringKeySerializer {
+    pub(super) key: Option<String>,
 }
 
 impl Serializer for &mut StringKeySerializer {

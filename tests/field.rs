@@ -9,11 +9,6 @@ use std::collections::BTreeMap;
 
 // Define test-specific structs here (copied from lib.rs tests)
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct NestedStruct {
-    inner_field: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 struct TestRecord {
     id: i32,
     name: String,
