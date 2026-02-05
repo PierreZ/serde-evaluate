@@ -3,6 +3,16 @@ use crate::value::FieldScalarValue;
 use serde::ser::{self};
 use serde::{Serialize, Serializer};
 
+/// Extraction mode for the serializer.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) enum ExtractionMode {
+    /// Extract a single scalar value (default behavior).
+    #[default]
+    Scalar,
+    /// Extract a list of scalar values from a sequence.
+    List,
+}
+
 // Helper function to wrap a value in N levels of Option(Some(...))
 fn wrap_in_options(value: FieldScalarValue, level: u8) -> FieldScalarValue {
     let mut current = value;
@@ -87,6 +97,302 @@ impl ser::SerializeSeq for Skip {
 }
 
 // -----------------------------------------------------------------------------
+// ListCapture: SerializeSeq implementation for capturing list elements
+// -----------------------------------------------------------------------------
+
+/// Enum to represent either Skip or ListCapture for SerializeSeq.
+pub(crate) enum SeqSerializer<'a> {
+    Skip(Skip),
+    ListCapture(ListCapture<'a>),
+}
+
+impl ser::SerializeSeq for SeqSerializer<'_> {
+    type Ok = ();
+    type Error = EvaluateError;
+
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        match self {
+            SeqSerializer::Skip(s) => s.serialize_element(value),
+            SeqSerializer::ListCapture(c) => c.serialize_element(value),
+        }
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        match self {
+            SeqSerializer::Skip(s) => s.end(),
+            SeqSerializer::ListCapture(c) => c.end(),
+        }
+    }
+}
+
+/// Captures each element of a sequence as a scalar value.
+pub(crate) struct ListCapture<'a> {
+    serializer: &'a mut FieldValueExtractorSerializer,
+}
+
+impl ser::SerializeSeq for ListCapture<'_> {
+    type Ok = ();
+    type Error = EvaluateError;
+
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        // Create a sub-serializer to capture this single element as a scalar
+        let mut element_serializer = ScalarCaptureSerializer::new();
+        value.serialize(&mut element_serializer)?;
+
+        if let Some(scalar) = element_serializer.into_result() {
+            self.serializer.list_values.push(scalar);
+        }
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        // Mark that we found and processed the list by setting value to a sentinel
+        // The actual values are in list_values
+        self.serializer.value = Some(FieldScalarValue::Unit); // Sentinel to indicate success
+        self.serializer.ready_to_capture = false;
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ScalarCaptureSerializer: Captures a single scalar value from serialization
+// -----------------------------------------------------------------------------
+
+/// A minimal serializer that captures exactly one scalar value.
+/// Used to capture individual elements when extracting from a list.
+struct ScalarCaptureSerializer {
+    value: Option<FieldScalarValue>,
+}
+
+impl ScalarCaptureSerializer {
+    fn new() -> Self {
+        ScalarCaptureSerializer { value: None }
+    }
+
+    fn into_result(self) -> Option<FieldScalarValue> {
+        self.value
+    }
+}
+
+impl Serializer for &mut ScalarCaptureSerializer {
+    type Ok = ();
+    type Error = EvaluateError;
+
+    type SerializeSeq = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTuple = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
+
+    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Bool(v));
+        Ok(())
+    }
+
+    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::I8(v));
+        Ok(())
+    }
+
+    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::I16(v));
+        Ok(())
+    }
+
+    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::I32(v));
+        Ok(())
+    }
+
+    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::I64(v));
+        Ok(())
+    }
+
+    fn serialize_i128(self, v: i128) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::I128(v));
+        Ok(())
+    }
+
+    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::U8(v));
+        Ok(())
+    }
+
+    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::U16(v));
+        Ok(())
+    }
+
+    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::U32(v));
+        Ok(())
+    }
+
+    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::U64(v));
+        Ok(())
+    }
+
+    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::U128(v));
+        Ok(())
+    }
+
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::F32(v));
+        Ok(())
+    }
+
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::F64(v));
+        Ok(())
+    }
+
+    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Char(v));
+        Ok(())
+    }
+
+    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::String(v.to_string()));
+        Ok(())
+    }
+
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Bytes(v.to_vec()));
+        Ok(())
+    }
+
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Option(None));
+        Ok(())
+    }
+
+    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
+        // For Option<T> in list elements, serialize the inner value first
+        value.serialize(&mut *self)?;
+        // Wrap the captured value in Option(Some(...))
+        if let Some(inner) = self.value.take() {
+            self.value = Some(FieldScalarValue::Option(Some(Box::new(inner))));
+        }
+        Ok(())
+    }
+
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Unit);
+        Ok(())
+    }
+
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Unit);
+        Ok(())
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
+        self.value = Some(FieldScalarValue::Unit);
+        Ok(())
+    }
+
+    fn serialize_newtype_struct<T>(
+        self,
+        _name: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        value.serialize(&mut *self)
+    }
+
+    fn serialize_newtype_variant<T>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "newtype",
+        })
+    }
+
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "nested sequence",
+        })
+    }
+
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Err(EvaluateError::UnsupportedType { type_name: "tuple" })
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "tuple struct",
+        })
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "tuple",
+        })
+    }
+
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Err(EvaluateError::UnsupportedType { type_name: "map" })
+    }
+
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Err(EvaluateError::UnsupportedType {
+            type_name: "struct",
+        })
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Err(EvaluateError::UnsupportedVariant {
+            variant_type: "struct",
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
 
 // Custom Serializer Implementation Struct
 pub(crate) struct FieldValueExtractorSerializer {
@@ -96,6 +402,8 @@ pub(crate) struct FieldValueExtractorSerializer {
     current_map_key_match: Option<bool>, // Tracks if the current map key matched the path segment
     ready_to_capture: bool, // True if the *next* serialize_* call is for the final target value
     option_nesting_level: u8, // Tracks nesting level when capturing Option<Option<...>>
+    extraction_mode: ExtractionMode, // Whether extracting scalar or list
+    list_values: Vec<FieldScalarValue>, // Collects elements when in List mode
 }
 
 // Implement helper methods for the serializer
@@ -115,6 +423,27 @@ impl FieldValueExtractorSerializer {
             current_map_key_match: None,
             ready_to_capture: false, // Initialize flags
             option_nesting_level: 0,
+            extraction_mode: ExtractionMode::Scalar,
+            list_values: Vec::new(),
+        }
+    }
+
+    /// Creates a serializer configured to extract a list from a top-level field.
+    pub(crate) fn new_list(field_name: &str) -> Self {
+        Self::new_nested_list(vec![field_name.to_string()])
+    }
+
+    /// Creates a serializer configured to extract a list from a nested path.
+    pub(crate) fn new_nested_list(path_segments: Vec<String>) -> Self {
+        FieldValueExtractorSerializer {
+            path: path_segments,
+            current_path_index: 0,
+            value: None,
+            current_map_key_match: None,
+            ready_to_capture: false,
+            option_nesting_level: 0,
+            extraction_mode: ExtractionMode::List,
+            list_values: Vec::new(),
         }
     }
 
@@ -135,15 +464,27 @@ impl FieldValueExtractorSerializer {
     pub(crate) fn into_result(self) -> Option<FieldScalarValue> {
         self.value
     }
+
+    /// Returns the collected list values after list extraction.
+    /// Returns Some(vec) if list extraction was successful (even if empty).
+    /// Returns None if the target field was not found.
+    pub(crate) fn into_list_result(self) -> Option<Vec<FieldScalarValue>> {
+        // If value is set, we found the field
+        if self.value.is_some() {
+            Some(self.list_values)
+        } else {
+            None
+        }
+    }
 }
 
 // Implement the main Serializer trait for our extractor
 // Most methods either delegate to capture_value, handle path traversal, or return UnsupportedType/Skip.
-impl Serializer for &mut FieldValueExtractorSerializer {
+impl<'a> Serializer for &'a mut FieldValueExtractorSerializer {
     type Ok = ();
     type Error = EvaluateError;
 
-    type SerializeSeq = Skip;
+    type SerializeSeq = SeqSerializer<'a>;
     type SerializeTuple = Skip;
     type SerializeTupleStruct = Skip;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
@@ -217,11 +558,21 @@ impl Serializer for &mut FieldValueExtractorSerializer {
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         if self.ready_to_capture {
-            // Construct the nested None value based on the *current* nesting level.
-            let none_value =
-                wrap_in_options(FieldScalarValue::Option(None), self.option_nesting_level);
-            // Directly set the value, bypassing capture_value which would wrap again.
-            self.value = Some(none_value);
+            match self.extraction_mode {
+                ExtractionMode::Scalar => {
+                    // Construct the nested None value based on the *current* nesting level.
+                    let none_value =
+                        wrap_in_options(FieldScalarValue::Option(None), self.option_nesting_level);
+                    // Directly set the value, bypassing capture_value which would wrap again.
+                    self.value = Some(none_value);
+                }
+                ExtractionMode::List => {
+                    // Option<Vec<T>> = None results in empty list
+                    // Set sentinel value to indicate we found the field (list_values remains empty)
+                    self.value = Some(FieldScalarValue::Unit);
+                    self.ready_to_capture = false;
+                }
+            }
             Ok(())
         } else {
             // Not capturing, None is just part of structure traversal.
@@ -306,14 +657,22 @@ impl Serializer for &mut FieldValueExtractorSerializer {
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         if self.ready_to_capture {
-            self.ready_to_capture = false;
-            Err(EvaluateError::UnsupportedType {
-                type_name: "sequence",
-            })
+            match self.extraction_mode {
+                ExtractionMode::Scalar => {
+                    self.ready_to_capture = false;
+                    Err(EvaluateError::UnsupportedType {
+                        type_name: "sequence",
+                    })
+                }
+                ExtractionMode::List => {
+                    // Return ListCapture to collect elements
+                    Ok(SeqSerializer::ListCapture(ListCapture { serializer: self }))
+                }
+            }
         } else {
             // If not capturing, we might be inside a struct field that *is* a sequence,
             // but it's not our target. Allow serialization to proceed to skip it.
-            Ok(Skip)
+            Ok(SeqSerializer::Skip(Skip))
         }
     }
 
