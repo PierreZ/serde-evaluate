@@ -246,7 +246,7 @@
 //!     let missing_nested_result = missing_nested_extractor.evaluate(&data);
 //!     assert!(matches!(
 //!         missing_nested_result,
-//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["nested".to_string(), "bad_field".to_string()]
+//!         Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["nested".to_string(), "bad_field".to_string()]
 //!     ));
 //!
 //!     // Trying to extract from a non-existent map key returns NestedFieldNotFound (with path up to failure)
@@ -254,7 +254,7 @@
 //!     let missing_map_key_result = missing_map_key_extractor.evaluate(&data);
 //!     assert!(matches!(
 //!         missing_map_key_result,
-//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "missing_key".to_string(), "value".to_string()]
+//!         Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["data_map".to_string(), "missing_key".to_string(), "value".to_string()]
 //!     ));
 //!
 //!     // Trying to extract a non-existent field within a valid map entry returns NestedFieldNotFound (with path up to failure)
@@ -262,7 +262,7 @@
 //!     let missing_map_inner_result = missing_map_inner_extractor.evaluate(&data);
 //!     assert!(matches!(
 //!         missing_map_inner_result,
-//!         Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "entry1".to_string(), "bad_field".to_string()]
+//!         Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["data_map".to_string(), "entry1".to_string(), "bad_field".to_string()]
 //!     ));
 //!
 //!     // Trying to extract a non-scalar field (struct) itself returns UnsupportedType

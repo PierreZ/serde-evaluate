@@ -4,6 +4,31 @@ use crate::value::FieldScalarValue;
 use serde::Serialize;
 
 // =============================================================================
+// Path Validation Helper
+// =============================================================================
+
+/// Validates and converts path segments to a Vec<String>.
+///
+/// Returns an error if the path is empty or any segment is empty.
+fn validate_path<S: AsRef<str>>(segments: &[S]) -> Result<Vec<String>, EvaluateError> {
+    if segments.is_empty() {
+        return Err(EvaluateError::InvalidPath(
+            "Path cannot be empty".to_string(),
+        ));
+    }
+
+    let segments: Vec<String> = segments.iter().map(|s| s.as_ref().to_string()).collect();
+
+    if segments.iter().any(|s| s.is_empty()) {
+        return Err(EvaluateError::InvalidPath(
+            "Path segments cannot be empty".to_string(),
+        ));
+    }
+
+    Ok(segments)
+}
+
+// =============================================================================
 // Scalar Extractors
 // =============================================================================
 
@@ -79,25 +104,8 @@ impl NestedFieldExtractor {
     /// Returns `EvaluateError::InvalidPath` if the input slice is empty or if any
     /// segment converts to an empty string.
     pub fn new_from_path<S: AsRef<str>>(path_segments: &[S]) -> Result<Self, EvaluateError> {
-        if path_segments.is_empty() {
-            return Err(EvaluateError::InvalidPath(
-                "Path cannot be empty".to_string(),
-            ));
-        }
-
-        let segments: Vec<String> = path_segments
-            .iter()
-            .map(|s| s.as_ref().to_string())
-            .collect();
-
-        if segments.iter().any(|s| s.is_empty()) {
-            return Err(EvaluateError::InvalidPath(
-                "Path segments cannot be empty".to_string(),
-            ));
-        }
-
         Ok(NestedFieldExtractor {
-            path_segments: segments,
+            path_segments: validate_path(path_segments)?,
         })
     }
 
@@ -127,6 +135,7 @@ impl NestedFieldExtractor {
             .into_result()
             .ok_or_else(|| EvaluateError::NestedFieldNotFound {
                 path: self.path_segments.clone(),
+                failed_at_index: None, // Index unknown at this point
             })
     }
 }
@@ -272,25 +281,8 @@ impl NestedListFieldExtractor {
     /// Returns `EvaluateError::InvalidPath` if the input slice is empty or if any
     /// segment converts to an empty string.
     pub fn new_from_path<S: AsRef<str>>(path_segments: &[S]) -> Result<Self, EvaluateError> {
-        if path_segments.is_empty() {
-            return Err(EvaluateError::InvalidPath(
-                "Path cannot be empty".to_string(),
-            ));
-        }
-
-        let segments: Vec<String> = path_segments
-            .iter()
-            .map(|s| s.as_ref().to_string())
-            .collect();
-
-        if segments.iter().any(|s| s.is_empty()) {
-            return Err(EvaluateError::InvalidPath(
-                "Path segments cannot be empty".to_string(),
-            ));
-        }
-
         Ok(NestedListFieldExtractor {
-            path_segments: segments,
+            path_segments: validate_path(path_segments)?,
         })
     }
 
@@ -322,6 +314,7 @@ impl NestedListFieldExtractor {
             .into_list_result()
             .ok_or_else(|| EvaluateError::NestedFieldNotFound {
                 path: self.path_segments.clone(),
+                failed_at_index: None, // Index unknown at this point
             })
     }
 }
