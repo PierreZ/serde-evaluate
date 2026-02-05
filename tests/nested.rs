@@ -142,7 +142,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
         .unwrap();
     let result_bad_intermediate = extractor_bad_intermediate.evaluate(&data);
     assert!(
-        matches!(result_bad_intermediate, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["middle".to_string(), "non_existent".to_string(), "value".to_string()]),
+        matches!(result_bad_intermediate, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["middle".to_string(), "non_existent".to_string(), "value".to_string()]),
         "Unexpected result for bad intermediate path: {:?}",
         result_bad_intermediate
     );
@@ -156,7 +156,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
     .unwrap();
     let result_bad_final = extractor_bad_final.evaluate(&data);
     assert!(
-        matches!(result_bad_final, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["middle".to_string(), "inner".to_string(), "non_existent".to_string()]),
+        matches!(result_bad_final, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["middle".to_string(), "inner".to_string(), "non_existent".to_string()]),
         "Unexpected result for bad final path: {:?}",
         result_bad_final
     );
@@ -171,7 +171,7 @@ fn test_extract_deeply_nested_field_comprehensive() {
         .unwrap();
     let result_traverse_primitive = extractor_traverse_primitive.evaluate(&data);
     assert!(
-        matches!(result_traverse_primitive, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["middle".to_string(), "primitive".to_string(), "should_fail".to_string()]),
+        matches!(result_traverse_primitive, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["middle".to_string(), "primitive".to_string(), "should_fail".to_string()]),
         "Expected NestedFieldNotFound, got {:?}",
         result_traverse_primitive
     );
@@ -264,7 +264,7 @@ fn test_extract_nested_map_field() {
         NestedFieldExtractor::new_from_path(&["data_map", "missing_key", "value"]).unwrap();
     let result_missing_key = extractor_missing_key.evaluate(&data);
     assert!(
-        matches!(result_missing_key, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "missing_key".to_string(), "value".to_string()]),
+        matches!(result_missing_key, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["data_map".to_string(), "missing_key".to_string(), "value".to_string()]),
         "Unexpected result for missing key: {:?}",
         result_missing_key
     );
@@ -274,7 +274,7 @@ fn test_extract_nested_map_field() {
         NestedFieldExtractor::new_from_path(&["data_map", "entry1", "bad_field"]).unwrap();
     let result_missing_inner = extractor_missing_inner.evaluate(&data);
     assert!(
-        matches!(result_missing_inner, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["data_map".to_string(), "entry1".to_string(), "bad_field".to_string()]),
+        matches!(result_missing_inner, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["data_map".to_string(), "entry1".to_string(), "bad_field".to_string()]),
         "Unexpected result for missing inner field: {:?}",
         result_missing_inner
     );
@@ -302,7 +302,7 @@ fn test_extract_nested_map_field() {
         NestedFieldExtractor::new_from_path(&["simple_map", "missing"]).unwrap();
     let result_simple_missing = extractor_simple_missing.evaluate(&data);
     assert!(
-        matches!(result_simple_missing, Err(EvaluateError::NestedFieldNotFound { ref path }) if path == &vec!["simple_map".to_string(), "missing".to_string()]),
+        matches!(result_simple_missing, Err(EvaluateError::NestedFieldNotFound { ref path, .. }) if path == &vec!["simple_map".to_string(), "missing".to_string()]),
         "Unexpected result for missing simple key: {:?}",
         result_simple_missing
     );

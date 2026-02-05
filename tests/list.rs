@@ -236,7 +236,7 @@ fn test_nested_list_path_not_found() {
 
     assert!(matches!(
         result,
-        Err(EvaluateError::NestedFieldNotFound { ref path })
+        Err(EvaluateError::NestedFieldNotFound { ref path, .. })
             if path == &vec!["metadata".to_string(), "nonexistent".to_string()]
     ));
 }
