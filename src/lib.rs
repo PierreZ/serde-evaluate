@@ -13,9 +13,11 @@
 //!
 //! *   **Extract Scalar Fields:** Retrieve basic scalar types (integers, floats, bool, char, String) from any level of a struct or map.
 //! *   **Nested Field Access:** Access fields within nested structs or maps using dot (`.`) or index (`[key]`) notation (e.g., `"outer.inner.field"`, `"map[key].field"`).
+//! *   **List Extraction (FanOut):** Extract `Vec<T>` fields where T is a scalar, returning each element separately for indexing.
 //! *   **Option Handling:**
 //!     *   `Option<Scalar>`: Correctly extracts as `Some(Scalar)` or `None`.
 //!     *   `Option<Option<Scalar>>`: Extracts nested `Option` types (e.g., `Some(Some(Scalar))`, `Some(None)`, `None`).
+//!     *   `Option<Vec<T>>` with `None`: Returns empty list when using list extractors.
 //! *   **Bytes Support:** Extracts `Vec<u8>` when annotated with `#[serde(with = "serde_bytes")]`.
 //! *   **Error Handling:** Returns specific errors for unsupported types (`UnsupportedType`) or missing fields (`FieldNotFound`, `NestedFieldNotFound`).
 //!
@@ -56,6 +58,48 @@
 //!     let active_extractor = FieldExtractor::new("is_active");
 //!     let active_value = active_extractor.evaluate(&profile)?;
 //!     assert_eq!(active_value, FieldScalarValue::Bool(true));
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! For extracting list fields (FanOut-style), use `ListFieldExtractor` or `NestedListFieldExtractor`:
+//!
+//! ```rust
+//! use serde::Serialize;
+//! use serde_evaluate::{ListFieldExtractor, NestedListFieldExtractor, FieldScalarValue, EvaluateError};
+//!
+//! #[derive(Serialize)]
+//! struct Record {
+//!     tags: Vec<String>,
+//!     metadata: Metadata,
+//! }
+//!
+//! #[derive(Serialize)]
+//! struct Metadata {
+//!     labels: Vec<String>,
+//! }
+//!
+//! fn main() -> Result<(), EvaluateError> {
+//!     let record = Record {
+//!         tags: vec!["rust".to_string(), "serde".to_string()],
+//!         metadata: Metadata {
+//!             labels: vec!["label1".to_string()],
+//!         },
+//!     };
+//!
+//!     // Extract top-level list
+//!     let extractor = ListFieldExtractor::new("tags");
+//!     let values = extractor.evaluate(&record)?;
+//!     assert_eq!(values, vec![
+//!         FieldScalarValue::String("rust".to_string()),
+//!         FieldScalarValue::String("serde".to_string()),
+//!     ]);
+//!
+//!     // Extract nested list
+//!     let nested_extractor = NestedListFieldExtractor::new_from_path(&["metadata", "labels"])?;
+//!     let nested_values = nested_extractor.evaluate(&record)?;
+//!     assert_eq!(nested_values, vec![FieldScalarValue::String("label1".to_string())]);
 //!
 //!     Ok(())
 //! }
@@ -271,5 +315,9 @@ pub use error::EvaluateError;
 pub use extractor::FieldExtractor;
 /// Public interface for extracting nested scalar field values.
 pub use extractor::NestedFieldExtractor;
+/// Public interface for extracting list of scalar values from a Vec<T> field.
+pub use extractor::ListFieldExtractor;
+/// Public interface for extracting list of scalar values from a nested Vec<T> field.
+pub use extractor::NestedListFieldExtractor;
 /// Enum representing the possible scalar values that can be extracted.
 pub use value::FieldScalarValue;
