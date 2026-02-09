@@ -13,6 +13,7 @@
 //!
 //! *   **Extract Scalar Fields:** Retrieve basic scalar types (integers, floats, bool, char, String) from any level of a struct or map.
 //! *   **Nested Field Access:** Access fields within nested structs or maps using dot (`.`) or index (`[key]`) notation (e.g., `"outer.inner.field"`, `"map[key].field"`).
+//! *   **Composite Extraction:** Extract multiple independent scalar fields at once, returning an ordered `Vec<FieldScalarValue>` for building composite index keys.
 //! *   **List Extraction (FanOut):** Extract `Vec<T>` fields where T is a scalar, returning each element separately for indexing.
 //! *   **Option Handling:**
 //!     *   `Option<Scalar>`: Correctly extracts as `Some(Scalar)` or `None`.
@@ -311,6 +312,8 @@ pub mod value;
 // Re-export public API
 /// Errors that can occur during field extraction.
 pub use error::EvaluateError;
+/// Public interface for extracting multiple scalar field values as an ordered Vec.
+pub use extractor::CompositeFieldExtractor;
 /// Public interface for extracting top-level scalar field values.
 pub use extractor::FieldExtractor;
 /// Public interface for extracting list of scalar values from a Vec<T> field.
