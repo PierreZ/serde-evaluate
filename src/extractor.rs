@@ -141,6 +141,159 @@ impl NestedFieldExtractor {
 }
 
 // =============================================================================
+// Composite Extractor
+// =============================================================================
+
+/// Extracts multiple independent scalar fields from a single `Serialize`able record,
+/// returning them as an ordered `Vec<FieldScalarValue>`.
+///
+/// This is useful for building composite index keys where multiple field values
+/// are combined into a single ordered key.
+///
+/// # Example
+///
+/// ```rust
+/// use serde::Serialize;
+/// use serde_evaluate::{CompositeFieldExtractor, FieldScalarValue, EvaluateError};
+///
+/// #[derive(Serialize)]
+/// struct Record {
+///     last_name: String,
+///     first_name: String,
+///     age: u32,
+/// }
+///
+/// fn main() -> Result<(), EvaluateError> {
+///     let record = Record {
+///         last_name: "Smith".to_string(),
+///         first_name: "John".to_string(),
+///         age: 30,
+///     };
+///
+///     let extractor = CompositeFieldExtractor::new(&["last_name", "first_name", "age"])?;
+///     let values = extractor.evaluate(&record)?;
+///
+///     assert_eq!(values, vec![
+///         FieldScalarValue::String("Smith".to_string()),
+///         FieldScalarValue::String("John".to_string()),
+///         FieldScalarValue::U32(30),
+///     ]);
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct CompositeFieldExtractor {
+    extractors: Vec<NestedFieldExtractor>,
+}
+
+impl CompositeFieldExtractor {
+    /// Creates a new `CompositeFieldExtractor` for top-level field names.
+    ///
+    /// Each field name is treated as a single-segment path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EvaluateError::InvalidPath` if the list is empty or any name is empty.
+    pub fn new<S: AsRef<str>>(field_names: &[S]) -> Result<Self, EvaluateError> {
+        if field_names.is_empty() {
+            return Err(EvaluateError::InvalidPath(
+                "Composite extractor requires at least one field".to_string(),
+            ));
+        }
+
+        let extractors = field_names
+            .iter()
+            .map(|name| NestedFieldExtractor::new_from_path(&[name.as_ref()]))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(CompositeFieldExtractor { extractors })
+    }
+
+    /// Creates a new `CompositeFieldExtractor` from a slice of field paths.
+    ///
+    /// Each inner slice represents the path segments to a field, supporting
+    /// both top-level (single-segment) and nested (multi-segment) paths.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use serde::Serialize;
+    /// use serde_evaluate::{CompositeFieldExtractor, FieldScalarValue, EvaluateError};
+    ///
+    /// #[derive(Serialize)]
+    /// struct Record {
+    ///     name: String,
+    ///     address: Address,
+    /// }
+    ///
+    /// #[derive(Serialize)]
+    /// struct Address {
+    ///     zip: String,
+    /// }
+    ///
+    /// fn main() -> Result<(), EvaluateError> {
+    ///     let record = Record {
+    ///         name: "Alice".to_string(),
+    ///         address: Address { zip: "90210".to_string() },
+    ///     };
+    ///
+    ///     let extractor = CompositeFieldExtractor::new_from_paths(&[
+    ///         &["name"],
+    ///         &["address", "zip"],
+    ///     ])?;
+    ///     let values = extractor.evaluate(&record)?;
+    ///
+    ///     assert_eq!(values, vec![
+    ///         FieldScalarValue::String("Alice".to_string()),
+    ///         FieldScalarValue::String("90210".to_string()),
+    ///     ]);
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `EvaluateError::InvalidPath` if the list is empty, any path is empty,
+    /// or any path segment is empty.
+    pub fn new_from_paths<S: AsRef<str>>(paths: &[&[S]]) -> Result<Self, EvaluateError> {
+        if paths.is_empty() {
+            return Err(EvaluateError::InvalidPath(
+                "Composite extractor requires at least one field".to_string(),
+            ));
+        }
+
+        let extractors = paths
+            .iter()
+            .map(|path| NestedFieldExtractor::new_from_path(path))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(CompositeFieldExtractor { extractors })
+    }
+
+    /// Extracts scalar values for all configured fields from the given record.
+    ///
+    /// Returns values in the same order as the fields were specified during construction.
+    /// Fails fast on the first extraction error.
+    ///
+    /// # Arguments
+    ///
+    /// * `record`: A reference to a value that implements `serde::Serialize`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first `EvaluateError` encountered during extraction.
+    pub fn evaluate<T: Serialize>(
+        &self,
+        record: &T,
+    ) -> Result<Vec<FieldScalarValue>, EvaluateError> {
+        self.extractors
+            .iter()
+            .map(|extractor| extractor.evaluate(record))
+            .collect()
+    }
+}
+
+// =============================================================================
 // List Extractors (FanOut-style)
 // =============================================================================
 
