@@ -367,8 +367,8 @@ fn test_extract_map_with_non_string_keys_error() {
     let extractor = NestedFieldExtractor::new_from_path(&["int_map", "42"]).unwrap();
     let result = extractor.evaluate(&record);
     assert!(
-        result.is_err(),
-        "Expected error for non-string map keys, got {:?}",
+        matches!(result, Err(EvaluateError::UnsupportedType { .. })),
+        "Expected UnsupportedType error for non-string map keys, got {:?}",
         result
     );
 }
