@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/PierreZ/serde-evaluate/compare/v0.2.1...v0.2.2) - 2026-03-30
+
+### Fixed
+
+- tighten assertion in non-string map keys test
+- prevent serialize_map from prematurely capturing intermediate path scalars
+
+### Other
+
+- add comprehensive coverage for untested serializer code paths
+- add extraction tests for structs with serde_json::Value fields
+
 ## [0.2.1](https://github.com/PierreZ/serde-evaluate/compare/v0.2.0...v0.2.1) - 2026-02-09
 
 ### Added
