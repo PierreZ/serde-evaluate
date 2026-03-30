@@ -557,3 +557,27 @@ fn test_nested_extract_struct_json_value_intermediate_scalar_should_error() {
         result
     );
 }
+
+// =============================================================================
+// Deep JSON nesting (4+ levels)
+// =============================================================================
+
+#[test]
+fn test_nested_extract_json_five_levels_deep() {
+    let json = serde_json::json!({"a": {"b": {"c": {"d": {"e": 42}}}}});
+    let extractor = NestedFieldExtractor::new_from_path(&["a", "b", "c", "d", "e"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert_eq!(result, Ok(FieldScalarValue::U64(42)));
+}
+
+// =============================================================================
+// Bare JSON object (no struct wrapper)
+// =============================================================================
+
+#[test]
+fn test_extract_field_from_bare_json_object() {
+    let json = serde_json::json!({"name": "test", "count": 42});
+    let extractor = FieldExtractor::new("name");
+    let result = extractor.evaluate(&json);
+    assert_eq!(result, Ok(FieldScalarValue::String("test".to_string())));
+}

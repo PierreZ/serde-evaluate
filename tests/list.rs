@@ -330,3 +330,133 @@ fn test_extract_list_with_option_elements() {
         ]
     );
 }
+
+// =============================================================================
+// NestedListFieldExtractor error paths
+// =============================================================================
+
+#[test]
+fn test_nested_list_intermediate_scalar_error() {
+    #[derive(Serialize)]
+    struct Record {
+        count: i32,
+    }
+    let record = Record { count: 42 };
+    let extractor = NestedListFieldExtractor::new_from_path(&["count", "items"]).unwrap();
+    let result = extractor.evaluate(&record);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound for scalar intermediate in list path, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_list_intermediate_not_found() {
+    #[derive(Serialize)]
+    struct Record {
+        name: String,
+    }
+    let record = Record {
+        name: "test".to_string(),
+    };
+    let extractor = NestedListFieldExtractor::new_from_path(&["nonexistent", "items"]).unwrap();
+    let result = extractor.evaluate(&record);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound for missing intermediate in list path, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_list_three_levels_deep() {
+    #[derive(Serialize)]
+    struct Level3 {
+        tags: Vec<String>,
+    }
+    #[derive(Serialize)]
+    struct Level2 {
+        deeper: Level3,
+    }
+    #[derive(Serialize)]
+    struct Level1 {
+        data: Level2,
+    }
+
+    let record = Level1 {
+        data: Level2 {
+            deeper: Level3 {
+                tags: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            },
+        },
+    };
+    let extractor = NestedListFieldExtractor::new_from_path(&["data", "deeper", "tags"]).unwrap();
+    let result = extractor.evaluate(&record).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            FieldScalarValue::String("x".to_string()),
+            FieldScalarValue::String("y".to_string()),
+            FieldScalarValue::String("z".to_string()),
+        ]
+    );
+}
+
+// =============================================================================
+// List of enum variants (ScalarCaptureSerializer rejection)
+// =============================================================================
+
+#[test]
+fn test_list_of_newtype_variants_rejected() {
+    #[derive(Serialize)]
+    enum MyEnum {
+        Data(String),
+    }
+    #[derive(Serialize)]
+    struct Record {
+        items: Vec<MyEnum>,
+    }
+    let record = Record {
+        items: vec![MyEnum::Data("hello".to_string())],
+    };
+    let extractor = ListFieldExtractor::new("items");
+    let result = extractor.evaluate(&record);
+    assert!(
+        matches!(
+            result,
+            Err(EvaluateError::UnsupportedVariant {
+                variant_type: "newtype"
+            })
+        ),
+        "Expected UnsupportedVariant newtype in list, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_list_of_tuple_variants_rejected() {
+    #[derive(Serialize)]
+    enum MyEnum {
+        Pair(i32, i32),
+    }
+    #[derive(Serialize)]
+    struct Record {
+        items: Vec<MyEnum>,
+    }
+    let record = Record {
+        items: vec![MyEnum::Pair(1, 2)],
+    };
+    let extractor = ListFieldExtractor::new("items");
+    let result = extractor.evaluate(&record);
+    assert!(
+        matches!(
+            result,
+            Err(EvaluateError::UnsupportedVariant {
+                variant_type: "tuple"
+            })
+        ),
+        "Expected UnsupportedVariant tuple in list, got {:?}",
+        result
+    );
+}
