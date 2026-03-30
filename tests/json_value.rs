@@ -447,3 +447,113 @@ fn test_extract_field_after_complex_json_value() {
     let result = extractor.evaluate(&record);
     assert_eq!(result, Ok(FieldScalarValue::String("target".to_string())));
 }
+
+// =============================================================================
+// NestedFieldExtractor: intermediate path is scalar (not object/map)
+// =============================================================================
+
+#[test]
+fn test_nested_extract_json_intermediate_scalar_should_error() {
+    // Path ["details", "rating"] but "details" is a string, not an object.
+    // Should error with NestedFieldNotFound, not return the string.
+    let json = serde_json::json!({"details": "not_an_object", "score": 42});
+    let extractor = NestedFieldExtractor::new_from_path(&["details", "rating"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when intermediate path is scalar, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_intermediate_number_should_error() {
+    // Path ["score", "sub"] but "score" is a number.
+    let json = serde_json::json!({"score": 42, "name": "test"});
+    let extractor = NestedFieldExtractor::new_from_path(&["score", "sub"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when intermediate path is number, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_intermediate_bool_should_error() {
+    // Path ["active", "sub"] but "active" is a bool.
+    let json = serde_json::json!({"active": true});
+    let extractor = NestedFieldExtractor::new_from_path(&["active", "sub"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when intermediate path is bool, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_intermediate_null_should_error() {
+    // Path ["data", "sub"] but "data" is null.
+    let json = serde_json::json!({"data": null});
+    let extractor = NestedFieldExtractor::new_from_path(&["data", "sub"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when intermediate path is null, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_intermediate_array_should_error() {
+    // Path ["details", "sub"] but "details" is an array, not an object.
+    let json = serde_json::json!({"details": [1, 2, 3]});
+    let extractor = NestedFieldExtractor::new_from_path(&["details", "sub"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when intermediate path is array, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_deeper_intermediate_scalar_should_error() {
+    // Path ["a", "b", "c"] but "b" is a scalar, not an object.
+    let json = serde_json::json!({"a": {"b": "scalar_not_object"}});
+    let extractor = NestedFieldExtractor::new_from_path(&["a", "b", "c"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound when deeper intermediate path is scalar, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_nested_extract_json_same_key_at_multiple_levels() {
+    // Path ["a", "a"] on {"a": {"a": 42}} — same key name at both levels.
+    let json = serde_json::json!({"a": {"a": 42}});
+    let extractor = NestedFieldExtractor::new_from_path(&["a", "a"]).unwrap();
+    let result = extractor.evaluate(&json);
+    assert_eq!(result, Ok(FieldScalarValue::U64(42)));
+}
+
+#[test]
+fn test_nested_extract_struct_json_value_intermediate_scalar_should_error() {
+    // Struct field "metadata" is a serde_json::Value containing {"config": "flat_string"}.
+    // Path ["metadata", "config", "region"] should error because "config" is a string.
+    let record = RecordWithJsonValue {
+        id: 1,
+        name: "test".to_string(),
+        metadata: serde_json::json!({"config": "flat_string"}),
+    };
+    let extractor = NestedFieldExtractor::new_from_path(&["metadata", "config", "region"]).unwrap();
+    let result = extractor.evaluate(&record);
+    assert!(
+        matches!(result, Err(EvaluateError::NestedFieldNotFound { .. })),
+        "Expected NestedFieldNotFound for struct→JSON intermediate scalar, got {:?}",
+        result
+    );
+}

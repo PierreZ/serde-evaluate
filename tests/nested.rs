@@ -307,3 +307,34 @@ fn test_extract_nested_map_field() {
         result_simple_missing
     );
 }
+
+#[test]
+fn test_extract_nested_pure_maps() {
+    // BTreeMap<String, BTreeMap<String, BTreeMap<String, i32>>>
+    // Tests map→map→map→scalar traversal.
+    let mut leaf = BTreeMap::new();
+    leaf.insert("leaf".to_string(), 42);
+
+    let mut inner = BTreeMap::new();
+    inner.insert("inner".to_string(), leaf);
+
+    let mut outer: BTreeMap<String, BTreeMap<String, BTreeMap<String, i32>>> = BTreeMap::new();
+    outer.insert("outer".to_string(), inner);
+
+    let extractor = NestedFieldExtractor::new_from_path(&["outer", "inner", "leaf"]).unwrap();
+    let result = extractor.evaluate(&outer);
+    assert_eq!(result, Ok(FieldScalarValue::I32(42)));
+
+    // Missing key at deepest level
+    let extractor_missing =
+        NestedFieldExtractor::new_from_path(&["outer", "inner", "missing"]).unwrap();
+    let result_missing = extractor_missing.evaluate(&outer);
+    assert!(
+        matches!(
+            result_missing,
+            Err(EvaluateError::NestedFieldNotFound { .. })
+        ),
+        "Expected NestedFieldNotFound for missing leaf key, got {:?}",
+        result_missing
+    );
+}
