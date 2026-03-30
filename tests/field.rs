@@ -405,3 +405,228 @@ fn test_nested_option_string_none() {
     let result = FieldExtractor::new("nested_option_string").evaluate(&test_struct);
     assert_eq!(result, Ok(FieldScalarValue::Option(None)));
 }
+
+// =============================================================================
+// Enum variant handling
+// =============================================================================
+
+#[derive(Serialize)]
+enum Status {
+    Active,
+    #[allow(dead_code)]
+    Inactive,
+}
+
+#[derive(Serialize)]
+enum Payload {
+    Data(String),
+}
+
+#[derive(Serialize)]
+enum Event {
+    Click(i32, i32),
+}
+
+#[derive(Serialize)]
+enum Task {
+    Todo { id: u32, title: String },
+}
+
+#[test]
+fn test_extract_unit_variant() {
+    #[derive(Serialize)]
+    struct Record {
+        status: Status,
+    }
+    let record = Record {
+        status: Status::Active,
+    };
+    let result = FieldExtractor::new("status").evaluate(&record);
+    assert_eq!(result, Ok(FieldScalarValue::Unit));
+}
+
+#[test]
+fn test_extract_newtype_variant_rejected() {
+    #[derive(Serialize)]
+    struct Record {
+        payload: Payload,
+    }
+    let record = Record {
+        payload: Payload::Data("hello".to_string()),
+    };
+    let result = FieldExtractor::new("payload").evaluate(&record);
+    assert!(
+        matches!(
+            result,
+            Err(EvaluateError::UnsupportedVariant {
+                variant_type: "newtype"
+            })
+        ),
+        "Expected UnsupportedVariant newtype, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_extract_tuple_variant_rejected() {
+    #[derive(Serialize)]
+    struct Record {
+        event: Event,
+    }
+    let record = Record {
+        event: Event::Click(10, 20),
+    };
+    let result = FieldExtractor::new("event").evaluate(&record);
+    assert!(
+        matches!(
+            result,
+            Err(EvaluateError::UnsupportedVariant {
+                variant_type: "tuple"
+            })
+        ),
+        "Expected UnsupportedVariant tuple, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_extract_struct_variant_rejected() {
+    #[derive(Serialize)]
+    struct Record {
+        task: Task,
+    }
+    let record = Record {
+        task: Task::Todo {
+            id: 1,
+            title: "test".to_string(),
+        },
+    };
+    let result = FieldExtractor::new("task").evaluate(&record);
+    assert!(
+        matches!(
+            result,
+            Err(EvaluateError::UnsupportedVariant {
+                variant_type: "struct"
+            })
+        ),
+        "Expected UnsupportedVariant struct, got {:?}",
+        result
+    );
+}
+
+// =============================================================================
+// Newtype struct transparency
+// =============================================================================
+
+#[test]
+fn test_extract_newtype_struct_field() {
+    #[derive(Serialize)]
+    struct UserId(u64);
+
+    #[derive(Serialize)]
+    struct User {
+        id: UserId,
+        name: String,
+    }
+
+    let user = User {
+        id: UserId(12345),
+        name: "Alice".to_string(),
+    };
+    let result = FieldExtractor::new("id").evaluate(&user);
+    assert_eq!(result, Ok(FieldScalarValue::U64(12345)));
+}
+
+#[test]
+fn test_nested_extract_through_newtype_struct() {
+    #[derive(Serialize)]
+    struct Inner {
+        value: i32,
+    }
+
+    #[derive(Serialize)]
+    struct Wrapper(Inner);
+
+    #[derive(Serialize)]
+    struct Outer {
+        wrapped: Wrapper,
+    }
+
+    let data = Outer {
+        wrapped: Wrapper(Inner { value: 99 }),
+    };
+    let extractor =
+        serde_evaluate::extractor::NestedFieldExtractor::new_from_path(&["wrapped", "value"])
+            .unwrap();
+    let result = extractor.evaluate(&data);
+    assert_eq!(result, Ok(FieldScalarValue::I32(99)));
+}
+
+// =============================================================================
+// Triple-nested Options
+// =============================================================================
+
+#[test]
+fn test_triple_nested_option_all_some() {
+    #[derive(Serialize)]
+    struct Record {
+        val: Option<Option<Option<u32>>>,
+    }
+    let record = Record {
+        val: Some(Some(Some(42))),
+    };
+    let result = FieldExtractor::new("val").evaluate(&record);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(Some(Box::new(FieldScalarValue::Option(Some(Box::new(
+                FieldScalarValue::U32(42)
+            ))))))
+        ))))
+    );
+}
+
+#[test]
+fn test_triple_nested_option_some_some_none() {
+    #[derive(Serialize)]
+    struct Record {
+        val: Option<Option<Option<u32>>>,
+    }
+    let record = Record {
+        val: Some(Some(None)),
+    };
+    let result = FieldExtractor::new("val").evaluate(&record);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(Some(Box::new(FieldScalarValue::Option(None))))
+        ))))
+    );
+}
+
+#[test]
+fn test_triple_nested_option_some_none() {
+    #[derive(Serialize)]
+    struct Record {
+        val: Option<Option<Option<u32>>>,
+    }
+    let record = Record { val: Some(None) };
+    let result = FieldExtractor::new("val").evaluate(&record);
+    assert_eq!(
+        result,
+        Ok(FieldScalarValue::Option(Some(Box::new(
+            FieldScalarValue::Option(None)
+        ))))
+    );
+}
+
+#[test]
+fn test_triple_nested_option_none() {
+    #[derive(Serialize)]
+    struct Record {
+        val: Option<Option<Option<u32>>>,
+    }
+    let record = Record { val: None };
+    let result = FieldExtractor::new("val").evaluate(&record);
+    assert_eq!(result, Ok(FieldScalarValue::Option(None)));
+}

@@ -350,7 +350,6 @@ impl<'a> Serializer for &'a mut FieldValueExtractorSerializer {
             }
         }
 
-        self.state.ready_to_capture = true;
         Ok(self)
     }
 
