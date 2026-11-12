@@ -354,7 +354,7 @@ fn test_extract_from_empty_map_intermediate() {
 }
 
 #[test]
-fn test_extract_map_with_non_string_keys_error() {
+fn test_extract_map_with_integer_keys() {
     #[derive(Serialize)]
     struct Record {
         int_map: BTreeMap<i32, String>,
@@ -366,9 +366,6 @@ fn test_extract_map_with_non_string_keys_error() {
 
     let extractor = NestedFieldExtractor::new_from_path(&["int_map", "42"]).unwrap();
     let result = extractor.evaluate(&record);
-    assert!(
-        matches!(result, Err(EvaluateError::UnsupportedType { .. })),
-        "Expected UnsupportedType error for non-string map keys, got {:?}",
-        result
-    );
+    // Integer keys are matched by their string form, like serde_json map keys.
+    assert_eq!(result, Ok(FieldScalarValue::String("value".to_string())));
 }

@@ -16,7 +16,14 @@ from a potentially large or complex structure, potentially residing
 within nested structs or maps.
 
 The extracted value is returned as a `FieldScalarValue` enum, which covers
-common scalar types (integers, floats, bool, string, char, bytes, unit, and options of these).
+common scalar types (integers, floats, bool, string, char, bytes, unit, unit enum variants,
+and options of these).
+
+Nested paths are given as a list of segments (struct fields or map keys), for example
+`&["settings", "feature_x", "level"]`. List extractors (`ListFieldExtractor`,
+`NestedListFieldExtractor`) return each element of a sequence field separately.
+
+Enable the `tracing` feature to instrument the public API with `tracing` spans.
 
 ## Basic Usage
 
@@ -97,3 +104,4 @@ fn main() -> Result<(), EvaluateError> {
 
     Ok(())
 }
+```

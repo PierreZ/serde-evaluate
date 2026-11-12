@@ -16,6 +16,12 @@ categories = ["encoding", "data-structures"]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11.19"
 thiserror = "2.0.18"
+tracing = { version = "0.1", optional = true, default-features = false, features = ["attributes", "std"] }
 
 [dev-dependencies]
 serde_json = "1"
+
+[features]
+default = []
+## Instrument the public API with `tracing` spans.
+tracing = ["dep:tracing"]

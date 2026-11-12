@@ -442,7 +442,8 @@ fn test_extract_unit_variant() {
         status: Status::Active,
     };
     let result = FieldExtractor::new("status").evaluate(&record);
-    assert_eq!(result, Ok(FieldScalarValue::Unit));
+    // Unit variants are captured by name, like serde_json does.
+    assert_eq!(result, Ok(FieldScalarValue::String("Active".to_string())));
 }
 
 #[test]

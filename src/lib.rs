@@ -7,27 +7,38 @@
 //! within nested structs or maps.
 //!
 //! The extracted value is returned as a `FieldScalarValue` enum, which covers
-//! common scalar types (integers, floats, bool, string, char, bytes, unit, and options of these).
+//! common scalar types (integers, floats, bool, string, char, bytes, unit, unit enum variants,
+//! and options of these).
 //!
 //! ## Features
 //!
 //! *   **Extract Scalar Fields:** Retrieve basic scalar types (integers, floats, bool, char, String) from any level of a struct or map.
-//! *   **Nested Field Access:** Access fields within nested structs or maps using dot (`.`) or index (`[key]`) notation (e.g., `"outer.inner.field"`, `"map[key].field"`).
+//! *   **Nested Field Access:** Access fields within nested structs or maps by passing the path as a list of segments
+//!     (e.g., `&["outer", "inner", "field"]` or `&["map", "key", "field"]`). There is no string path syntax:
+//!     `FieldExtractor::new("a.b")` looks for a field literally named `a.b`.
 //! *   **Composite Extraction:** Extract multiple independent scalar fields at once, returning an ordered `Vec<FieldScalarValue>` for building composite index keys.
 //! *   **List Extraction (FanOut):** Extract `Vec<T>` fields where T is a scalar, returning each element separately for indexing.
 //! *   **Option Handling:**
 //!     *   `Option<Scalar>`: Correctly extracts as `Some(Scalar)` or `None`.
 //!     *   `Option<Option<Scalar>>`: Extracts nested `Option` types (e.g., `Some(Some(Scalar))`, `Some(None)`, `None`).
 //!     *   `Option<Vec<T>>` with `None`: Returns empty list when using list extractors.
+//!     *   Fields omitted by `#[serde(skip_serializing_if = ...)]` are reported as `Option(None)`
+//!         (or an empty list for list extractors) rather than as missing.
 //! *   **Bytes Support:** Extracts `Vec<u8>` when annotated with `#[serde(with = "serde_bytes")]`.
-//! *   **Error Handling:** Returns specific errors for unsupported types (`UnsupportedType`) or missing fields (`FieldNotFound`, `NestedFieldNotFound`).
+//! *   **Error Handling:** Returns specific errors for unsupported types (`UnsupportedType`, `UnsupportedVariant`) or missing fields
+//!     (`FieldNotFound`, `NestedFieldNotFound` with the index of the first segment that could not be matched).
+//! *   **Tracing:** Enable the `tracing` feature to instrument the public API with `tracing` spans.
 //!
 //! ## How it Works
 //!
-//! It uses a custom Serde `Serializer` (`FieldValueExtractorSerializer`) that intercepts
-//! the serialization process. When the target field path (which can include struct fields
-//! and map keys separated by dots) is encountered, its scalar value is captured.
-//! Serialization of other fields or parts of the structure is skipped efficiently.
+//! It uses a custom Serde `Serializer` that intercepts the serialization process. It walks
+//! struct fields and map entries along the path, and captures the value once the last segment
+//! is reached. Struct fields and map values that are not on the path are never serialized,
+//! although map keys are, to compare them with the path.
+//!
+//! Map keys are compared by their string form, following serde_json's rules: strings, chars,
+//! integers, bools, unit enum variants and newtype wrappers around them. Entries whose key has
+//! no string form (for example a tuple) cannot be addressed and are skipped.
 //!
 //! ## Usage
 //!
@@ -291,17 +302,28 @@
 //! - `char`
 //! - `String`, `&str`
 //! - `Vec<u8>` (requires `#[serde(with = "serde_bytes")]` on the field)
-//! - Unit (`()`)
+//! - Unit (`()`) and unit structs, captured as `FieldScalarValue::Unit`
+//! - Unit enum variants, captured by name as `FieldScalarValue::String` (like serde_json)
+//! - Newtype structs wrapping any of the above
 //!
 //! Attempting to extract a field path that ultimately points to other types like nested structs,
-//! sequences (except `Vec<u8` with `serde_bytes`), maps, or enums with data will result in an
-//! `EvaluateError::UnsupportedType`. Similarly, if any intermediate part of the path
-//! (e.g., `middle` in `top.middle.leaf`) is not a struct or a map, extraction will fail.
+//! sequences (except `Vec<u8>` with `serde_bytes`), maps or tuples results in
+//! `EvaluateError::UnsupportedType`. Externally tagged enum variants carrying data
+//! (newtype, tuple and struct variants, including `Result`) result in
+//! `EvaluateError::UnsupportedVariant`, both as a target and when the path goes through them.
+//! Internally tagged, adjacently tagged and untagged enums serialize as structs or maps, so
+//! their fields can be traversed (e.g. `&["event", "type"]` for `#[serde(tag = "type")]`).
 //!
-//! **Note:** While `Option<Scalar>` fields can be extracted directly (yielding `FieldScalarValue::Option(Some(scalar))`
-//! or `FieldScalarValue::Option(None)`), traversing *through* an `Option` to access fields within the `Some` variant
-//! (e.g., `opt_struct.inner_field`) is currently **not supported**. The extraction path must target the `Option` itself.
+//! If an intermediate part of the path (e.g., `middle` in `top.middle.leaf`) is a scalar,
+//! a sequence or `None`, the path is not found (`EvaluateError::NestedFieldNotFound`).
 //!
+//! **Options on the path:** `Some` is transparent: `&["opt_struct", "inner_field"]` reaches
+//! `inner_field` inside `Some(..)` and returns its value unwrapped. When `opt_struct` is `None`,
+//! the result is `EvaluateError::NestedFieldNotFound` pointing at `inner_field`.
+//!
+//! **List extractors** accept any sequence (`Vec<T>`, sets, fixed-size arrays `[T; N]`) whose
+//! elements are scalars. `None` and unit (JSON `null`) yield an empty list. Any other target,
+//! including a scalar, results in `EvaluateError::UnsupportedType`.
 //!
 // Declare modules
 pub mod error;
@@ -316,11 +338,11 @@ pub use error::EvaluateError;
 pub use extractor::CompositeFieldExtractor;
 /// Public interface for extracting top-level scalar field values.
 pub use extractor::FieldExtractor;
-/// Public interface for extracting list of scalar values from a Vec<T> field.
+/// Public interface for extracting list of scalar values from a `Vec<T>` field.
 pub use extractor::ListFieldExtractor;
 /// Public interface for extracting nested scalar field values.
 pub use extractor::NestedFieldExtractor;
-/// Public interface for extracting list of scalar values from a nested Vec<T> field.
+/// Public interface for extracting list of scalar values from a nested `Vec<T>` field.
 pub use extractor::NestedListFieldExtractor;
 /// Enum representing the possible scalar values that can be extracted.
 pub use value::FieldScalarValue;
