@@ -1,34 +1,49 @@
-//! StringKeySerializer for extracting string keys from maps.
+//! Converts map keys to strings so they can be compared with path segments.
 //!
-//! Used to compare map keys against path segments during traversal.
+//! Follows serde_json's rules for map keys: strings, chars, integers, bools,
+//! unit enum variants and newtype wrappers around any of those. Any other key
+//! cannot be addressed by a path and is treated as a non-match.
 
 use crate::error::EvaluateError;
+use serde::ser::Impossible;
 use serde::{Serialize, Serializer};
 
-/// Helper serializer to extract a string key from map serialization.
-pub(super) struct StringKeySerializer {
-    pub(super) key: Option<String>,
+/// Returns the string form of a map key, or `None` if the key cannot be stringified.
+pub(super) fn key_to_string<T: ?Sized + Serialize>(key: &T) -> Option<String> {
+    key.serialize(KeySerializer).ok()
 }
 
-impl Serializer for &mut StringKeySerializer {
-    type Ok = ();
+struct KeySerializer;
+
+macro_rules! impl_to_string_methods {
+    ($($method:ident($ty:ty)),* $(,)?) => {
+        $(
+            fn $method(self, v: $ty) -> Result<Self::Ok, Self::Error> {
+                Ok(v.to_string())
+            }
+        )*
+    };
+}
+
+const NOT_A_KEY: EvaluateError = EvaluateError::UnsupportedType {
+    type_name: "map key",
+};
+
+impl Serializer for KeySerializer {
+    type Ok = String;
     type Error = EvaluateError;
 
-    type SerializeSeq = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeTuple = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeTupleStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeMap = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeStruct = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
+    type SerializeSeq = Impossible<String, EvaluateError>;
+    type SerializeTuple = Impossible<String, EvaluateError>;
+    type SerializeTupleStruct = Impossible<String, EvaluateError>;
+    type SerializeTupleVariant = Impossible<String, EvaluateError>;
+    type SerializeMap = Impossible<String, EvaluateError>;
+    type SerializeStruct = Impossible<String, EvaluateError>;
+    type SerializeStructVariant = Impossible<String, EvaluateError>;
 
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        self.key = Some(v.to_string());
-        Ok(())
-    }
-
-    // All non-string types return an error as map keys must be strings
-    impl_key_reject_methods! {
+    impl_to_string_methods! {
+        serialize_str(&str),
+        serialize_char(char),
         serialize_bool(bool),
         serialize_i8(i8),
         serialize_i16(i16),
@@ -40,132 +55,40 @@ impl Serializer for &mut StringKeySerializer {
         serialize_u32(u32),
         serialize_u64(u64),
         serialize_u128(u128),
-        serialize_f32(f32),
-        serialize_f64(f64),
-        serialize_char(char),
-        serialize_bytes(&[u8]),
-        serialize_unit(),
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_some<T>(self, _value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Option",
-        })
-    }
-
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
     }
 
     fn serialize_unit_variant(
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
+        Ok(variant.to_string())
     }
 
-    fn serialize_newtype_struct<T>(
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
-        _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error> {
+        value.serialize(self)
     }
 
-    fn serialize_newtype_variant<T>(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_tuple_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_tuple_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
-    }
-
-    fn serialize_struct_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Err(EvaluateError::UnsupportedType {
-            type_name: "Map key must be a string",
-        })
+    impl_reject_methods! { NOT_A_KEY;
+        fn serialize_f32(v: f32) -> Self::Ok;
+        fn serialize_f64(v: f64) -> Self::Ok;
+        fn serialize_bytes(v: &[u8]) -> Self::Ok;
+        fn serialize_none() -> Self::Ok;
+        fn serialize_some<T>(value: &T) -> Self::Ok;
+        fn serialize_unit() -> Self::Ok;
+        fn serialize_unit_struct(name: &'static str) -> Self::Ok;
+        fn serialize_newtype_variant<T>(name: &'static str, index: u32, variant: &'static str, value: &T) -> Self::Ok;
+        fn serialize_seq(len: Option<usize>) -> Self::SerializeSeq;
+        fn serialize_tuple(len: usize) -> Self::SerializeTuple;
+        fn serialize_tuple_struct(name: &'static str, len: usize) -> Self::SerializeTupleStruct;
+        fn serialize_tuple_variant(name: &'static str, index: u32, variant: &'static str, len: usize) -> Self::SerializeTupleVariant;
+        fn serialize_map(len: Option<usize>) -> Self::SerializeMap;
+        fn serialize_struct(name: &'static str, len: usize) -> Self::SerializeStruct;
+        fn serialize_struct_variant(name: &'static str, index: u32, variant: &'static str, len: usize) -> Self::SerializeStructVariant;
     }
 }

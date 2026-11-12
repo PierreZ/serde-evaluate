@@ -318,13 +318,29 @@ fn error_empty_inner_path() {
 }
 
 #[test]
+fn error_nested_path_not_found() {
+    let extractor = CompositeFieldExtractor::new_from_paths(&[&["nonexistent"]]).unwrap();
+    let err = extractor.evaluate(&sample_record()).unwrap_err();
+    assert_eq!(
+        err,
+        EvaluateError::NestedFieldNotFound {
+            path: vec!["nonexistent".to_string()],
+            failed_at_index: Some(0),
+        }
+    );
+}
+
+#[test]
 fn error_field_not_found() {
     let extractor = CompositeFieldExtractor::new(&["name", "nonexistent"]).unwrap();
     let err = extractor.evaluate(&sample_record()).unwrap_err();
-    assert!(matches!(
+    // Top-level names report FieldNotFound, like FieldExtractor.
+    assert_eq!(
         err,
-        EvaluateError::NestedFieldNotFound { ref path, .. } if path == &vec!["nonexistent".to_string()]
-    ));
+        EvaluateError::FieldNotFound {
+            field_name: "nonexistent".to_string()
+        }
+    );
 }
 
 #[test]
@@ -356,8 +372,11 @@ fn error_first_field_fails_fast() {
     let extractor = CompositeFieldExtractor::new(&["missing", "name"]).unwrap();
     let err = extractor.evaluate(&sample_record()).unwrap_err();
     // Should fail on "missing" before even trying "name"
-    assert!(matches!(
+    // Top-level names report FieldNotFound, like FieldExtractor.
+    assert_eq!(
         err,
-        EvaluateError::NestedFieldNotFound { ref path, .. } if path == &vec!["missing".to_string()]
-    ));
+        EvaluateError::FieldNotFound {
+            field_name: "missing".to_string()
+        }
+    );
 }

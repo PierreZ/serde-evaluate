@@ -30,17 +30,8 @@ pub enum EvaluateError {
     NestedFieldNotFound {
         /// The full path segments that were not found.
         path: Vec<String>,
-        /// The index of the path segment where traversal failed (if known).
+        /// The index of the first path segment that could not be matched.
         failed_at_index: Option<usize>,
-    },
-
-    /// An intermediate part of the path pointed to a non-struct type.
-    #[error("Cannot traverse non-struct type at path segment {index}: '{segment}'")]
-    NotAStruct {
-        /// The path segment that was not a struct.
-        segment: String,
-        /// The index in the path where this occurred.
-        index: usize,
     },
 
     /// The value of the target field has a type that is not supported for scalar extraction.

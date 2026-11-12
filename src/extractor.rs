@@ -1,7 +1,10 @@
 use crate::error::EvaluateError;
-use crate::serializer::FieldValueExtractorSerializer;
+use crate::serializer::{extract, Extraction, ListMode, Mode, ScalarMode};
 use crate::value::FieldScalarValue;
 use serde::Serialize;
+
+#[cfg(feature = "tracing")]
+use tracing::instrument;
 
 // =============================================================================
 // Path Validation Helper
@@ -28,6 +31,43 @@ fn validate_path<S: AsRef<str>>(segments: &[S]) -> Result<Vec<String>, EvaluateE
     Ok(segments)
 }
 
+/// Rejects an empty top-level field name, for the infallible `new` constructors.
+fn check_field_name(field_name: &str) -> Result<(), EvaluateError> {
+    if field_name.is_empty() {
+        return Err(EvaluateError::InvalidPath(
+            "Field name cannot be empty".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn field_not_found(field_name: &str) -> EvaluateError {
+    EvaluateError::FieldNotFound {
+        field_name: field_name.to_string(),
+    }
+}
+
+fn nested_field_not_found(path: &[String], failed_at_index: usize) -> EvaluateError {
+    EvaluateError::NestedFieldNotFound {
+        path: path.to_vec(),
+        failed_at_index: Some(failed_at_index),
+    }
+}
+
+/// Shared implementation of every extractor: runs the traversal and maps a
+/// missing target to the extractor-specific error.
+fn run<M, T, F>(record: &T, path: &[String], not_found: F) -> Result<M::Output, EvaluateError>
+where
+    M: Mode,
+    T: ?Sized + Serialize,
+    F: FnOnce(usize) -> EvaluateError,
+{
+    match extract::<M, T>(record, path)? {
+        Extraction::Found(value) => Ok(value),
+        Extraction::Missing { failed_at_index } => Err(not_found(failed_at_index)),
+    }
+}
+
 // =============================================================================
 // Scalar Extractors
 // =============================================================================
@@ -38,16 +78,21 @@ fn validate_path<S: AsRef<str>>(segments: &[S]) -> Result<Vec<String>, EvaluateE
 /// The primary way to use this is via the associated function [`FieldExtractor::evaluate`].
 #[derive(Debug, Clone)]
 pub struct FieldExtractor {
-    field_name: String,
+    /// Single-segment path holding the field name.
+    path: Vec<String>,
 }
 
 impl FieldExtractor {
     /// Creates a new `FieldExtractor` configured to target the specified field name.
     ///
     /// Accepts any type that can be converted into a `String`, such as `&str`.
+    /// The name is taken literally: `"a.b"` targets a field named `a.b`, not a nested
+    /// path. Use [`NestedFieldExtractor`] for nested fields. An empty name makes
+    /// [`FieldExtractor::evaluate`] return [`EvaluateError::InvalidPath`].
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all))]
     pub fn new<S: Into<String>>(field_name: S) -> Self {
         FieldExtractor {
-            field_name: field_name.into(),
+            path: vec![field_name.into()],
         }
     }
 
@@ -62,20 +107,15 @@ impl FieldExtractor {
     /// # Errors
     ///
     /// Returns `EvaluateError` if:
+    /// * The field name is empty ([`EvaluateError::InvalidPath`]).
     /// * The `field_name` is not found in the `record` ([`EvaluateError::FieldNotFound`]).
     /// * The `field_name`'s value is not a supported scalar type ([`EvaluateError::UnsupportedType`]).
     /// * Any other Serde serialization error occurs.
+    #[cfg_attr(feature = "tracing", instrument(level = "debug", skip(record), err))]
     pub fn evaluate<T: Serialize>(&self, record: &T) -> Result<FieldScalarValue, EvaluateError> {
-        let mut serializer = FieldValueExtractorSerializer::new(&self.field_name);
-        // Attempt to serialize the record using our custom serializer.
-        record.serialize(&mut serializer)?;
-
-        // After serialization, check if the serializer captured a result.
-        serializer
-            .into_result()
-            .ok_or_else(|| EvaluateError::FieldNotFound {
-                field_name: self.field_name.clone(),
-            })
+        let field_name = &self.path[0];
+        check_field_name(field_name)?;
+        run::<ScalarMode, _, _>(record, &self.path, |_| field_not_found(field_name))
     }
 }
 
@@ -103,6 +143,7 @@ impl NestedFieldExtractor {
     ///
     /// Returns `EvaluateError::InvalidPath` if the input slice is empty or if any
     /// segment converts to an empty string.
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all, err))]
     pub fn new_from_path<S: AsRef<str>>(path_segments: &[S]) -> Result<Self, EvaluateError> {
         Ok(NestedFieldExtractor {
             path_segments: validate_path(path_segments)?,
@@ -121,22 +162,17 @@ impl NestedFieldExtractor {
     /// # Returns
     ///
     /// * `Ok(FieldScalarValue)` if the field at the specified path is found and is a supported scalar type.
-    /// * `Err(EvaluateError)` if the path is invalid, an intermediate field is not a struct,
-    ///   the final field is not found or has an unsupported type, or a serialization error occurs.
+    /// * `Err(EvaluateError::NestedFieldNotFound)` if a segment cannot be matched, including when
+    ///   an intermediate value is a scalar, a sequence or `None`. `failed_at_index` is the index
+    ///   of the first segment that could not be matched.
+    /// * `Err(EvaluateError::UnsupportedType)` if the final value is not a supported scalar.
+    /// * `Err(EvaluateError::UnsupportedVariant)` if the path goes through or ends on an
+    ///   externally tagged enum variant carrying data.
+    #[cfg_attr(feature = "tracing", instrument(level = "debug", skip(value), err))]
     pub fn evaluate<T: Serialize>(&self, value: &T) -> Result<FieldScalarValue, EvaluateError> {
-        // Clone the path segments because new_nested takes ownership, but evaluate only has &self.
-        let mut serializer = FieldValueExtractorSerializer::new_nested(self.path_segments.clone());
-
-        // Attempt to serialize the record using our custom serializer.
-        value.serialize(&mut serializer)?;
-
-        // After serialization, check if the serializer captured a result.
-        serializer
-            .into_result()
-            .ok_or_else(|| EvaluateError::NestedFieldNotFound {
-                path: self.path_segments.clone(),
-                failed_at_index: None, // Index unknown at this point
-            })
+        run::<ScalarMode, _, _>(value, &self.path_segments, |index| {
+            nested_field_not_found(&self.path_segments, index)
+        })
     }
 }
 
@@ -183,7 +219,25 @@ impl NestedFieldExtractor {
 /// ```
 #[derive(Debug, Clone)]
 pub struct CompositeFieldExtractor {
-    extractors: Vec<NestedFieldExtractor>,
+    extractors: Vec<ScalarExtractor>,
+}
+
+/// One field of a [`CompositeFieldExtractor`]. Top-level names report
+/// [`EvaluateError::FieldNotFound`], like [`FieldExtractor`]; paths report
+/// [`EvaluateError::NestedFieldNotFound`], like [`NestedFieldExtractor`].
+#[derive(Debug, Clone)]
+enum ScalarExtractor {
+    Field(FieldExtractor),
+    Nested(NestedFieldExtractor),
+}
+
+impl ScalarExtractor {
+    fn evaluate<T: Serialize>(&self, record: &T) -> Result<FieldScalarValue, EvaluateError> {
+        match self {
+            ScalarExtractor::Field(e) => e.evaluate(record),
+            ScalarExtractor::Nested(e) => e.evaluate(record),
+        }
+    }
 }
 
 impl CompositeFieldExtractor {
@@ -194,6 +248,7 @@ impl CompositeFieldExtractor {
     /// # Errors
     ///
     /// Returns `EvaluateError::InvalidPath` if the list is empty or any name is empty.
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all, err))]
     pub fn new<S: AsRef<str>>(field_names: &[S]) -> Result<Self, EvaluateError> {
         if field_names.is_empty() {
             return Err(EvaluateError::InvalidPath(
@@ -203,8 +258,11 @@ impl CompositeFieldExtractor {
 
         let extractors = field_names
             .iter()
-            .map(|name| NestedFieldExtractor::new_from_path(&[name.as_ref()]))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|name| {
+                check_field_name(name.as_ref())?;
+                Ok(ScalarExtractor::Field(FieldExtractor::new(name.as_ref())))
+            })
+            .collect::<Result<Vec<_>, EvaluateError>>()?;
 
         Ok(CompositeFieldExtractor { extractors })
     }
@@ -255,6 +313,7 @@ impl CompositeFieldExtractor {
     ///
     /// Returns `EvaluateError::InvalidPath` if the list is empty, any path is empty,
     /// or any path segment is empty.
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all, err))]
     pub fn new_from_paths<S: AsRef<str>>(paths: &[&[S]]) -> Result<Self, EvaluateError> {
         if paths.is_empty() {
             return Err(EvaluateError::InvalidPath(
@@ -264,7 +323,7 @@ impl CompositeFieldExtractor {
 
         let extractors = paths
             .iter()
-            .map(|path| NestedFieldExtractor::new_from_path(path))
+            .map(|path| NestedFieldExtractor::new_from_path(path).map(ScalarExtractor::Nested))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(CompositeFieldExtractor { extractors })
@@ -282,6 +341,7 @@ impl CompositeFieldExtractor {
     /// # Errors
     ///
     /// Returns the first `EvaluateError` encountered during extraction.
+    #[cfg_attr(feature = "tracing", instrument(level = "debug", skip(record), err))]
     pub fn evaluate<T: Serialize>(
         &self,
         record: &T,
@@ -333,20 +393,23 @@ impl CompositeFieldExtractor {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ListFieldExtractor {
-    field_name: String,
+    /// Single-segment path holding the field name.
+    path: Vec<String>,
 }
 
 impl ListFieldExtractor {
     /// Creates a new `ListFieldExtractor` configured to target the specified field name.
     ///
     /// Accepts any type that can be converted into a `String`, such as `&str`.
+    /// An empty name makes [`ListFieldExtractor::evaluate`] return [`EvaluateError::InvalidPath`].
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all))]
     pub fn new<S: Into<String>>(field_name: S) -> Self {
         ListFieldExtractor {
-            field_name: field_name.into(),
+            path: vec![field_name.into()],
         }
     }
 
-    /// Extracts all scalar elements from a `Vec<T>` field.
+    /// Extracts all scalar elements from a sequence field (`Vec<T>`, `[T; N]`, sets...).
     ///
     /// # Arguments
     ///
@@ -355,25 +418,24 @@ impl ListFieldExtractor {
     /// # Returns
     ///
     /// * `Ok(Vec<FieldScalarValue>)` containing each element as a scalar value.
-    /// * `Ok(vec![])` for empty lists or `Option<Vec<T>>` with `None`.
+    /// * `Ok(vec![])` for empty lists, `Option<Vec<T>>` with `None`, unit (JSON `null`),
+    ///   and fields skipped with `#[serde(skip_serializing_if = ...)]`.
     ///
     /// # Errors
     ///
     /// Returns `EvaluateError` if:
+    /// * The field name is empty ([`EvaluateError::InvalidPath`]).
     /// * The `field_name` is not found in the `record` ([`EvaluateError::FieldNotFound`]).
-    /// * The list elements are not scalar types ([`EvaluateError::UnsupportedType`]).
+    /// * The target is not a sequence, or its elements are not scalar types
+    ///   ([`EvaluateError::UnsupportedType`]).
+    #[cfg_attr(feature = "tracing", instrument(level = "debug", skip(record), err))]
     pub fn evaluate<T: Serialize>(
         &self,
         record: &T,
     ) -> Result<Vec<FieldScalarValue>, EvaluateError> {
-        let mut serializer = FieldValueExtractorSerializer::new_list(&self.field_name);
-        record.serialize(&mut serializer)?;
-
-        serializer
-            .into_list_result()
-            .ok_or_else(|| EvaluateError::FieldNotFound {
-                field_name: self.field_name.clone(),
-            })
+        let field_name = &self.path[0];
+        check_field_name(field_name)?;
+        run::<ListMode, _, _>(record, &self.path, |_| field_not_found(field_name))
     }
 }
 
@@ -433,6 +495,7 @@ impl NestedListFieldExtractor {
     ///
     /// Returns `EvaluateError::InvalidPath` if the input slice is empty or if any
     /// segment converts to an empty string.
+    #[cfg_attr(feature = "tracing", instrument(level = "trace", skip_all, err))]
     pub fn new_from_path<S: AsRef<str>>(path_segments: &[S]) -> Result<Self, EvaluateError> {
         Ok(NestedListFieldExtractor {
             path_segments: validate_path(path_segments)?,
@@ -448,26 +511,22 @@ impl NestedListFieldExtractor {
     /// # Returns
     ///
     /// * `Ok(Vec<FieldScalarValue>)` containing each element as a scalar value.
-    /// * `Ok(vec![])` for empty lists or `Option<Vec<T>>` with `None`.
+    /// * `Ok(vec![])` for empty lists, `Option<Vec<T>>` with `None`, unit (JSON `null`),
+    ///   and fields skipped with `#[serde(skip_serializing_if = ...)]`.
     ///
     /// # Errors
     ///
     /// Returns `EvaluateError` if:
     /// * The path is not found ([`EvaluateError::NestedFieldNotFound`]).
-    /// * The list elements are not scalar types ([`EvaluateError::UnsupportedType`]).
+    /// * The target is not a sequence, or its elements are not scalar types
+    ///   ([`EvaluateError::UnsupportedType`]).
+    #[cfg_attr(feature = "tracing", instrument(level = "debug", skip(value), err))]
     pub fn evaluate<T: Serialize>(
         &self,
         value: &T,
     ) -> Result<Vec<FieldScalarValue>, EvaluateError> {
-        let mut serializer =
-            FieldValueExtractorSerializer::new_nested_list(self.path_segments.clone());
-        value.serialize(&mut serializer)?;
-
-        serializer
-            .into_list_result()
-            .ok_or_else(|| EvaluateError::NestedFieldNotFound {
-                path: self.path_segments.clone(),
-                failed_at_index: None, // Index unknown at this point
-            })
+        run::<ListMode, _, _>(value, &self.path_segments, |index| {
+            nested_field_not_found(&self.path_segments, index)
+        })
     }
 }

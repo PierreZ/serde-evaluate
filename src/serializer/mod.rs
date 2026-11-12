@@ -1,110 +1,59 @@
-//! Serializer module containing the custom Serde serializers for field extraction.
+//! Custom Serde serializers used to extract field values.
 //!
-//! This module is split into focused submodules:
-//! - `skip`: Skip struct for efficiently skipping non-target content
-//! - `scalar_capture`: Serializer for capturing individual scalar values from list elements
-//! - `key`: Serializer for extracting string keys from maps
-//! - `list`: List capture logic for extracting Vec<T> fields
-//! - `extractor`: Main FieldValueExtractorSerializer
+//! Extraction is split in two phases:
+//! - `traversal`: walks structs and maps along the configured path. Values that are
+//!   not on the path are never serialized.
+//! - `capture`: once the final segment is reached, the target value is handed to a
+//!   capture serializer, either for a single scalar or for a list of scalars.
+//!
+//! `key` turns map keys into strings so they can be compared with path segments,
+//! and `skip` swallows sequences and tuples that are not on the path.
 
 // =============================================================================
 // Macros for reducing repetitive serialize method implementations
 // =============================================================================
 
-/// Generates scalar serialize methods for `ScalarCaptureSerializer`.
-///
-/// Each method sets `self.value` to the corresponding `FieldScalarValue` variant.
-///
-/// # Usage
-/// ```ignore
-/// impl_scalar_capture_methods! {
-///     serialize_bool(bool) => Bool,
-///     serialize_i32(i32) => I32,
-/// }
-/// ```
-macro_rules! impl_scalar_capture_methods {
+/// Generates `serialize_*` methods that ignore their scalar argument.
+macro_rules! impl_ignore_methods {
+    ($($method:ident($ty:ty)),* $(,)?) => {
+        $(
+            fn $method(self, _v: $ty) -> Result<Self::Ok, Self::Error> {
+                Ok(Default::default())
+            }
+        )*
+    };
+}
+
+/// Generates `serialize_*` methods that wrap their argument in a `FieldScalarValue` variant.
+macro_rules! impl_scalar_methods {
     ($($method:ident($ty:ty) => $variant:ident),* $(,)?) => {
         $(
             fn $method(self, v: $ty) -> Result<Self::Ok, Self::Error> {
-                self.value = Some(FieldScalarValue::$variant(v));
-                Ok(())
+                Ok(FieldScalarValue::$variant(v))
             }
         )*
     };
 }
 
-/// Generates scalar serialize methods for `FieldValueExtractorSerializer`.
+/// Generates `serialize_*` methods that all fail with the same error.
 ///
-/// Each method calls `capture_value()` with the corresponding `FieldScalarValue` variant.
-///
-/// # Usage
-/// ```ignore
-/// impl_extractor_capture_methods! {
-///     serialize_bool(bool) => Bool,
-///     serialize_i32(i32) => I32,
-/// }
-/// ```
-macro_rules! impl_extractor_capture_methods {
-    ($($method:ident($ty:ty) => $variant:ident),* $(,)?) => {
+/// Works for any method signature, including generic ones and the methods
+/// returning compound serializers.
+macro_rules! impl_reject_methods {
+    ($err:expr; $(fn $method:ident $(<$g:ident>)? ($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
         $(
-            fn $method(self, v: $ty) -> Result<Self::Ok, Self::Error> {
-                self.capture_value(FieldScalarValue::$variant(v))
+            fn $method $(<$g: ?Sized + serde::Serialize>)? (self, $($arg: $ty),*) -> Result<$ret, Self::Error> {
+                $(let _ = $arg;)*
+                Err($err)
             }
         )*
     };
 }
 
-/// Generates rejection methods for `StringKeySerializer`.
-///
-/// Each method returns an `UnsupportedType` error since map keys must be strings.
-///
-/// # Usage
-/// ```ignore
-/// impl_key_reject_methods! {
-///     serialize_bool(bool),
-///     serialize_i32(i32),
-///     serialize_unit(),
-/// }
-/// ```
-macro_rules! impl_key_reject_methods {
-    ($($method:ident($($ty:ty),*)),* $(,)?) => {
-        $(
-            fn $method(self, $(_: $ty),*) -> Result<Self::Ok, Self::Error> {
-                Err(EvaluateError::UnsupportedType {
-                    type_name: "Map key must be a string",
-                })
-            }
-        )*
-    };
-}
-
-// Note: Macros defined above are automatically available to submodules
-
-mod extractor;
+mod capture;
 mod key;
-mod list;
-mod scalar_capture;
 mod skip;
+mod traversal;
 
-pub(crate) use extractor::FieldValueExtractorSerializer;
-
-use crate::value::FieldScalarValue;
-
-/// Extraction mode for the serializer.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub(crate) enum ExtractionMode {
-    /// Extract a single scalar value (default behavior).
-    #[default]
-    Scalar,
-    /// Extract a list of scalar values from a sequence.
-    List,
-}
-
-/// Helper function to wrap a value in N levels of Option(Some(...))
-pub(crate) fn wrap_in_options(value: FieldScalarValue, level: u8) -> FieldScalarValue {
-    let mut current = value;
-    for _ in 0..level {
-        current = FieldScalarValue::Option(Some(Box::new(current)));
-    }
-    current
-}
+pub(crate) use capture::{ListMode, Mode, ScalarMode};
+pub(crate) use traversal::{extract, Extraction};
