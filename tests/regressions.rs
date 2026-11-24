@@ -362,3 +362,46 @@ fn unmatched_map_values_are_not_serialized() {
     );
     assert_eq!(calls.get(), 1);
 }
+
+// =============================================================================
+// Known limitation: skipped fields inside `#[serde(flatten)]`
+// =============================================================================
+
+#[derive(Serialize)]
+struct FlatInner {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    a: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct FlatOuter {
+    #[serde(flatten)]
+    inner: FlatInner,
+}
+
+// serde's flatten serializer does not forward `SerializeStruct::skip_field`, so fields omitted
+// by `skip_serializing_if` inside a flattened struct are indistinguishable from missing ones.
+// This is a serde limitation, pinned here so a change in behavior is noticed.
+#[test]
+fn skipped_fields_inside_flatten_are_not_found() {
+    let outer = FlatOuter {
+        inner: FlatInner {
+            a: None,
+            tags: vec![],
+        },
+    };
+    assert_eq!(
+        FieldExtractor::new("a").evaluate(&outer),
+        Err(EvaluateError::FieldNotFound {
+            field_name: "a".to_string()
+        })
+    );
+    assert_eq!(
+        ListFieldExtractor::new("tags").evaluate(&outer),
+        Err(EvaluateError::FieldNotFound {
+            field_name: "tags".to_string()
+        })
+    );
+}
