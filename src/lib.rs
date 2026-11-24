@@ -23,7 +23,9 @@
 //!     *   `Option<Option<Scalar>>`: Extracts nested `Option` types (e.g., `Some(Some(Scalar))`, `Some(None)`, `None`).
 //!     *   `Option<Vec<T>>` with `None`: Returns empty list when using list extractors.
 //!     *   Fields omitted by `#[serde(skip_serializing_if = ...)]` are reported as `Option(None)`
-//!         (or an empty list for list extractors) rather than as missing.
+//!         (or an empty list for list extractors) rather than as missing. Exception: serde does not
+//!         report skipped fields inside a `#[serde(flatten)]` struct, so those are still
+//!         `FieldNotFound` / `NestedFieldNotFound`.
 //! *   **Bytes Support:** Extracts `Vec<u8>` when annotated with `#[serde(with = "serde_bytes")]`.
 //! *   **Error Handling:** Returns specific errors for unsupported types (`UnsupportedType`, `UnsupportedVariant`) or missing fields
 //!     (`FieldNotFound`, `NestedFieldNotFound` with the index of the first segment that could not be matched).

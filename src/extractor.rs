@@ -122,7 +122,8 @@ impl FieldExtractor {
 /// Extracts a potentially nested scalar field value using a pre-defined path.
 ///
 /// This struct allows specifying a path as a sequence of field names.
-/// It uses the `FieldValueExtractorSerializer` internally to traverse the structure.
+/// The extraction walks the value with a custom serializer and only serializes the fields
+/// and map entries on the path.
 #[derive(Debug, Clone)]
 pub struct NestedFieldExtractor {
     /// The sequence of field names representing the path to the target value.
