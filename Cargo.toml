@@ -13,9 +13,9 @@ keywords = ["serde", "serialization", "extraction", "evaluate", "field"]
 categories = ["encoding", "data-structures"]
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 serde_bytes = "0.11.19"
-thiserror = "2.0.18"
+thiserror = "2.0.21"
 tracing = { version = "0.1", optional = true, default-features = false, features = ["attributes", "std"] }
 
 [dev-dependencies]
